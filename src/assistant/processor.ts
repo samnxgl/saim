@@ -89,8 +89,23 @@ async function handleCEOCommands(
 ): Promise<string | null> {
   const lowerText = text.toLowerCase();
 
-  // Handle delegation command
-  if (lowerText.startsWith('delegate to ') || lowerText.startsWith('ask ')) {
+  // Handle delegation command - expanded patterns
+  const delegationPatterns = [
+    'delegate to',
+    'ask ',
+    'reach out to',
+    'contact ',
+    'message ',
+    'send a message to',
+    'talk to',
+    'check with',
+    'follow up with',
+    'get from',
+    'request from',
+  ];
+
+  const isDelegation = delegationPatterns.some(pattern => lowerText.includes(pattern));
+  if (isDelegation) {
     return handleDelegation(text, context);
   }
 
@@ -131,18 +146,42 @@ async function handleDelegation(
   text: string,
   context: Awaited<ReturnType<typeof buildFullContext>>
 ): Promise<string> {
-  // Parse the delegation command
-  // Expected formats:
-  // "Delegate to [Name]: [instruction]"
-  // "Ask [Name] to [instruction]"
+  // Try multiple patterns to extract the target name
+  const patterns = [
+    /(?:delegate to|ask|reach out to|contact|message|talk to|check with|follow up with)\s+(?:my direct report,?\s*)?(\w+(?:[- ]\w+)?)/i,
+    /(?:get|request)\s+(?:an?\s+)?(?:update|status|report)\s+from\s+(\w+(?:[- ]\w+)?)/i,
+    /(\w+(?:[- ]\w+)?)\s+(?:to|and)\s+(?:give|provide|send|share)/i,
+  ];
 
-  const delegateMatch = text.match(/(?:delegate to|ask)\s+(\w+(?:\s+\w+)?)[:\s]+(.+)/i);
+  let targetName: string | null = null;
 
-  if (!delegateMatch) {
-    return "I couldn't parse that delegation request. Please use the format: 'Delegate to [Name]: [instruction]' or 'Ask [Name] to [instruction]'";
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      targetName = match[1];
+      break;
+    }
   }
 
-  const [, targetName, instruction] = delegateMatch;
+  // Also try to find a direct report name mentioned in the text
+  if (!targetName) {
+    for (const dr of context.directReports) {
+      const firstName = dr.name.split(' ')[0].toLowerCase();
+      const fullName = dr.name.toLowerCase();
+      if (text.toLowerCase().includes(firstName) || text.toLowerCase().includes(fullName)) {
+        targetName = dr.name;
+        break;
+      }
+    }
+  }
+
+  if (!targetName) {
+    const availableNames = context.directReports.map((dr) => dr.name).join(', ');
+    return `I couldn't identify who you want me to contact. Available direct reports: ${availableNames}\n\nPlease try again with a specific name, e.g., "Ask [Name] to provide an update on..."`;
+  }
+
+  // The instruction is the full request for context
+  const instruction = text;
 
   // Find the direct report
   const directReport = await findDirectReportByName(targetName);
