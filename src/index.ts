@@ -1,15 +1,15 @@
 import express from 'express';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
-import { initializeSlackApp, registerSlackHandlers } from './integrations/slack/index.js';
-import { startScheduler, runInitialSync } from './services/scheduler.js';
 import { closeDatabase } from './db/index.js';
 
 async function main() {
+  console.log('=== Saim Starting ===');
   logger.info('Starting Saim - Virtual Executive Assistant');
   logger.info(`Environment: ${config.nodeEnv}`);
+  logger.info(`Port: ${config.port}`);
 
-  // Initialize Express for health checks
+  // Initialize Express for health checks FIRST
   const expressApp = express();
 
   expressApp.get('/health', (req, res) => {
@@ -28,62 +28,80 @@ async function main() {
     });
   });
 
-  // Start Express server
-  const server = expressApp.listen(config.port, () => {
+  // Start Express server immediately for health checks
+  const server = expressApp.listen(config.port, '0.0.0.0', () => {
+    console.log(`Health check server listening on 0.0.0.0:${config.port}`);
     logger.info(`Health check server listening on port ${config.port}`);
   });
 
-  // Initialize Slack app
-  const slackApp = initializeSlackApp();
-  registerSlackHandlers(slackApp);
+  // Initialize remaining services after health check is available
+  try {
+    // Import Slack modules
+    const { initializeSlackApp, registerSlackHandlers } = await import('./integrations/slack/index.js');
 
-  // Start Slack app
-  await slackApp.start();
-  logger.info('Slack app started in socket mode');
+    // Initialize Slack app
+    logger.info('Initializing Slack app...');
+    const slackApp = initializeSlackApp();
+    registerSlackHandlers(slackApp);
 
-  // Run initial data sync
-  logger.info('Running initial data synchronization...');
-  await runInitialSync();
+    // Start Slack app
+    await slackApp.start();
+    logger.info('Slack app started in socket mode');
 
-  // Start scheduler for periodic tasks
-  startScheduler();
+    // Import and run initial sync (don't block startup)
+    const { startScheduler, runInitialSync } = await import('./services/scheduler.js');
 
-  // Graceful shutdown handling
-  const shutdown = async () => {
-    logger.info('Shutdown signal received');
-
-    // Stop scheduler
-    const { stopScheduler } = await import('./services/scheduler.js');
-    stopScheduler();
-
-    // Stop Slack app
-    await slackApp.stop();
-    logger.info('Slack app stopped');
-
-    // Close database
-    await closeDatabase();
-    logger.info('Database connection closed');
-
-    // Close Express server
-    server.close(() => {
-      logger.info('HTTP server closed');
-      process.exit(0);
+    // Run initial sync in background
+    runInitialSync().catch((error) => {
+      logger.error('Initial sync failed', { error });
     });
 
-    // Force exit after 10 seconds
-    setTimeout(() => {
-      logger.warn('Forcing exit after timeout');
-      process.exit(1);
-    }, 10000);
-  };
+    // Start scheduler for periodic tasks
+    startScheduler();
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+    // Graceful shutdown handling
+    const shutdown = async () => {
+      logger.info('Shutdown signal received');
 
-  logger.info('Saim is now running and ready to assist!');
+      // Stop scheduler
+      const { stopScheduler } = await import('./services/scheduler.js');
+      stopScheduler();
+
+      // Stop Slack app
+      await slackApp.stop();
+      logger.info('Slack app stopped');
+
+      // Close database
+      await closeDatabase();
+      logger.info('Database connection closed');
+
+      // Close Express server
+      server.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+      });
+
+      // Force exit after 10 seconds
+      setTimeout(() => {
+        logger.warn('Forcing exit after timeout');
+        process.exit(1);
+      }, 10000);
+    };
+
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+
+    logger.info('Saim is now running and ready to assist!');
+    console.log('=== Saim Ready ===');
+  } catch (error) {
+    logger.error('Failed to initialize services', { error });
+    console.error('Service initialization error:', error);
+    // Keep running for health checks, but log the error
+  }
 }
 
 main().catch((error) => {
+  console.error('Fatal error during startup:', error);
   logger.error('Failed to start Saim', { error });
   process.exit(1);
 });
