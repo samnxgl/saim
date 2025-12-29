@@ -5,6 +5,9 @@ import { processMessage, processDelegatedTaskResponse } from '../../assistant/in
 import { db, schema } from '../../db/index.js';
 import { eq, and } from 'drizzle-orm';
 
+// Track threads where Saim is active (in-memory for simplicity)
+const activeThreads = new Set<string>();
+
 export function registerSlackHandlers(app: App): void {
   // Handle direct mentions
   app.event('app_mention', async ({ event, say }) => {
@@ -15,6 +18,10 @@ export function registerSlackHandlers(app: App): void {
     }
 
     logger.info('Received app mention', { user: userId, channel: event.channel });
+
+    // Track this thread as active
+    const threadKey = `${event.channel}:${event.thread_ts || event.ts}`;
+    activeThreads.add(threadKey);
 
     try {
       const response = await processMessage({
@@ -38,36 +45,50 @@ export function registerSlackHandlers(app: App): void {
     }
   });
 
-  // Handle direct messages
-  app.message(async ({ message, say }) => {
+  // Handle all messages (DMs and thread replies)
+  app.message(async ({ message, say, context }) => {
     // Type guard for generic messages (not subtyped)
     const msg = message as GenericMessageEvent;
 
-    // Ignore bot messages
+    // Ignore bot messages (including our own)
     if ('bot_id' in message || 'subtype' in message) {
-      return;
-    }
-
-    // Only process DMs (channels starting with D)
-    if (!msg.channel.startsWith('D')) {
       return;
     }
 
     const userId = msg.user;
     const text = msg.text || '';
     const ts = msg.ts;
+    const threadTs = msg.thread_ts;
 
     if (!userId || !text) {
       return;
     }
 
-    logger.info('Received DM', { user: userId, channel: msg.channel });
+    // Check if this is a DM
+    const isDM = msg.channel.startsWith('D');
+
+    // Check if this is a reply in an active thread
+    const threadKey = threadTs ? `${msg.channel}:${threadTs}` : null;
+    const isActiveThread = threadKey && activeThreads.has(threadKey);
+
+    // Only respond to DMs or active thread replies
+    if (!isDM && !isActiveThread) {
+      return;
+    }
+
+    logger.info('Received message', {
+      user: userId,
+      channel: msg.channel,
+      isDM,
+      isActiveThread,
+      threadTs
+    });
 
     try {
       const isCEO = userId === config.ceoSlackUserId;
 
-      // Check if this is a response to a delegated task
-      if (!isCEO) {
+      // Check if this is a response to a delegated task (for non-CEO DMs)
+      if (!isCEO && isDM) {
         const pendingTask = await checkForPendingTask(userId);
         if (pendingTask) {
           await handleDelegatedTaskResponse(pendingTask, text, userId, say, ts);
@@ -79,18 +100,19 @@ export function registerSlackHandlers(app: App): void {
         text,
         userId,
         channelId: msg.channel,
-        threadTs: ts,
+        threadTs: threadTs || ts,
         isCEO,
       });
 
       await say({
         text: response,
-        thread_ts: ts,
+        thread_ts: threadTs || ts,
       });
     } catch (error) {
-      logger.error('Error handling DM', { error });
+      logger.error('Error handling message', { error });
       await say({
         text: "I encountered an error processing your message. Please try again.",
+        thread_ts: threadTs || ts,
       });
     }
   });
