@@ -13,14 +13,14 @@ const configSchema = z.object({
   anthropicApiKey: z.string().min(1),
 
   // Google
-  googleServiceAccountEmail: z.string().email(),
+  googleServiceAccountEmail: z.string().min(1),
   googlePrivateKey: z.string().min(1),
 
   // Document IDs
   strategicPlanDocId: z.string().min(1),
 
   // Database
-  databaseUrl: z.string().url(),
+  databaseUrl: z.string().min(1),
 
   // CEO
   ceoSlackUserId: z.string().min(1),
@@ -39,6 +39,8 @@ const configSchema = z.object({
 export type Config = z.infer<typeof configSchema>;
 
 function loadConfig(): Config {
+  console.log('Loading configuration...');
+
   const raw = {
     slackBotToken: process.env.SLACK_BOT_TOKEN,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
@@ -57,7 +59,32 @@ function loadConfig(): Config {
     financialSyncInterval: parseInt(process.env.FINANCIAL_SYNC_INTERVAL || '120', 10),
   };
 
-  return configSchema.parse(raw);
+  // Log which variables are missing (without exposing values)
+  const requiredVars = [
+    'SLACK_BOT_TOKEN',
+    'SLACK_SIGNING_SECRET',
+    'SLACK_APP_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+    'GOOGLE_PRIVATE_KEY',
+    'STRATEGIC_PLAN_DOC_ID',
+    'DATABASE_URL',
+    'CEO_SLACK_USER_ID',
+  ];
+
+  const missing = requiredVars.filter(v => !process.env[v]);
+  if (missing.length > 0) {
+    console.error('Missing required environment variables:', missing.join(', '));
+  }
+
+  try {
+    const config = configSchema.parse(raw);
+    console.log('Configuration loaded successfully');
+    return config;
+  } catch (error) {
+    console.error('Configuration validation failed:', error);
+    throw error;
+  }
 }
 
 export const config = loadConfig();
