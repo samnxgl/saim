@@ -58,8 +58,15 @@ export async function chat(
         outputTokens: response.usage.output_tokens,
       },
     };
-  } catch (error) {
-    logger.error('Claude API error', { error });
+  } catch (error: any) {
+    // Log detailed error information
+    logger.error('Claude API error', {
+      message: error?.message,
+      status: error?.status,
+      type: error?.type,
+      error: JSON.stringify(error, Object.getOwnPropertyNames(error))
+    });
+    console.error('Claude API Error Details:', error);
     throw error;
   }
 }
