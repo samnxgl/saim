@@ -129,7 +129,7 @@ export async function getPodcastStatus(requestId: string): Promise<PodcastStatus
 
 export async function waitForPodcastCompletion(
   requestId: string,
-  maxWaitMs: number = 600000, // 10 minutes default
+  maxWaitMs: number = 900000, // 15 minutes default
   pollIntervalMs: number = 10000 // 10 seconds
 ): Promise<PodcastStatusResponse> {
   const startTime = Date.now();
@@ -156,7 +156,7 @@ export async function waitForPodcastCompletion(
     await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
   }
 
-  throw new Error(`Podcast generation timed out after ${maxWaitMs / 1000} seconds`);
+  throw new Error(`Podcast generation timed out after ${Math.round(maxWaitMs / 1000)} seconds`);
 }
 
 export function isAutoContentConfigured(): boolean {
