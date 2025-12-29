@@ -84,6 +84,7 @@ export async function buildFullContext(): Promise<{
   financialSummary: string | null;
   recentPatterns: string[];
   directReports: Array<{ name: string; role: string }>;
+  recentSlackMessages: string | null;
 }> {
   // Get strategic plan
   const plan = await getLatestStrategicPlan();
@@ -108,6 +109,28 @@ export async function buildFullContext(): Promise<{
   // Get direct reports
   const directReports = await db.select().from(schema.directReports);
 
+  // Get recent Slack messages
+  const recentMessages = await db
+    .select()
+    .from(schema.slackMessages)
+    .orderBy(desc(schema.slackMessages.createdAt))
+    .limit(100);
+
+  let recentSlackMessages: string | null = null;
+  if (recentMessages.length > 0) {
+    recentSlackMessages = recentMessages
+      .map((m) => `[${m.channelName || 'DM'}] ${m.userName || 'Unknown'}: ${m.text}`)
+      .join('\n');
+  }
+
+  logger.info('Built context', {
+    hasStrategicPlan: !!plan?.content,
+    hasFinancialData: !!financialSummary,
+    patternsCount: recentPatterns.length,
+    directReportsCount: directReports.length,
+    slackMessagesCount: recentMessages.length,
+  });
+
   return {
     strategicPlan: plan?.content || null,
     financialSummary,
@@ -116,6 +139,7 @@ export async function buildFullContext(): Promise<{
       name: dr.name,
       role: dr.role,
     })),
+    recentSlackMessages,
   };
 }
 

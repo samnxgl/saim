@@ -43,6 +43,7 @@ export async function processMessage(input: ProcessMessageInput): Promise<string
     financialData: fullContext.financialSummary || undefined,
     patterns: fullContext.recentPatterns,
     directReports: fullContext.directReports.map((dr) => `${dr.name} (${dr.role})`),
+    slackMessages: fullContext.recentSlackMessages || undefined,
   });
 
   // Prepare messages for Claude

@@ -119,6 +119,7 @@ export function buildContextualPrompt(
     financialData?: string;
     patterns?: string[];
     directReports?: string[];
+    slackMessages?: string;
   }
 ): string {
   let enrichedPrompt = basePrompt;
@@ -139,6 +140,10 @@ export function buildContextualPrompt(
 
   if (context.directReports && context.directReports.length > 0) {
     enrichedPrompt += `\n## Direct Reports\n${context.directReports.map((dr) => `- ${dr}`).join('\n')}\n`;
+  }
+
+  if (context.slackMessages) {
+    enrichedPrompt += `\n## Recent Slack Communications\n${context.slackMessages}\n`;
   }
 
   return enrichedPrompt;
