@@ -6,6 +6,8 @@ import { syncAllFinancialSheets } from '../integrations/google/sheets.js';
 import { syncSlackMessages } from '../integrations/slack/sync.js';
 import { analyzeRecentCommunications, sendDailyBriefing } from './patterns.js';
 import { checkPendingTasks } from './tasks.js';
+import { sendDailyPodcastToCEO } from './podcast.js';
+import { isAutoContentConfigured } from '../integrations/autocontent/index.js';
 
 let isRunning = false;
 const scheduledJobs: cron.ScheduledTask[] = [];
@@ -101,6 +103,27 @@ export function startScheduler(): void {
       }
     })
   );
+
+  // Generate daily podcast at configured time (default 6 PM)
+  if (isAutoContentConfigured()) {
+    const [hour, minute] = config.dailyPodcastTime.split(':');
+    const cronTime = `${minute || '0'} ${hour || '18'} * * *`;
+
+    scheduledJobs.push(
+      cron.schedule(cronTime, async () => {
+        logger.info('Running scheduled daily podcast generation');
+        try {
+          await sendDailyPodcastToCEO();
+        } catch (error) {
+          logger.error('Scheduled daily podcast failed', { error });
+        }
+      })
+    );
+
+    logger.info('Daily podcast scheduled', { time: config.dailyPodcastTime });
+  } else {
+    logger.info('Daily podcast not scheduled - AUTOCONTENT_API_KEY not configured');
+  }
 
   isRunning = true;
   logger.info('Scheduler started with all jobs');

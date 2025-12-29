@@ -11,6 +11,8 @@ import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 import { sendDirectMessage } from '../integrations/slack/client.js';
+import { generateDailyPodcast, generateYesterdaysPodcast } from '../services/podcast.js';
+import { isAutoContentConfigured } from '../integrations/autocontent/index.js';
 
 export interface ProcessMessageInput {
   text: string;
@@ -139,6 +141,11 @@ async function handleCEOCommands(
     return handleValuesGuidance(text);
   }
 
+  // Handle podcast command
+  if (lowerText.includes('podcast') || lowerText.includes('audio summary') || lowerText.includes('daily recap')) {
+    return handlePodcastCommand(text);
+  }
+
   return null;
 }
 
@@ -253,6 +260,50 @@ async function handleValuesGuidance(text: string): Promise<string> {
   );
 
   return response.content;
+}
+
+async function handlePodcastCommand(text: string): Promise<string> {
+  // Check if AutoContent API is configured
+  if (!isAutoContentConfigured()) {
+    return "The podcast feature isn't configured yet. Please set the AUTOCONTENT_API_KEY environment variable to enable daily audio summaries.";
+  }
+
+  const lowerText = text.toLowerCase();
+
+  try {
+    // Check if they want yesterday's podcast
+    if (lowerText.includes('yesterday')) {
+      logger.info('Generating podcast for yesterday');
+      const result = await generateYesterdaysPodcast();
+
+      if (!result.success || !result.audioUrl) {
+        return `I wasn't able to generate yesterday's podcast. ${result.error || 'Please try again later.'}`;
+      }
+
+      const transcriptPreview = result.transcript
+        ? `\n\n**Transcript preview:**\n${result.transcript.slice(0, 500)}${result.transcript.length > 500 ? '...' : ''}`
+        : '';
+
+      return `Here's your audio summary of yesterday's Slack activity (${result.messageCount} messages):\n\n🎧 **Listen here:** ${result.audioUrl}${transcriptPreview}`;
+    }
+
+    // Default to today's podcast
+    logger.info('Generating podcast for today');
+    const result = await generateDailyPodcast();
+
+    if (!result.success || !result.audioUrl) {
+      return `I wasn't able to generate today's podcast. ${result.error || 'Please try again later.'}`;
+    }
+
+    const transcriptPreview = result.transcript
+      ? `\n\n**Transcript preview:**\n${result.transcript.slice(0, 500)}${result.transcript.length > 500 ? '...' : ''}`
+      : '';
+
+    return `Here's your audio summary of today's Slack activity (${result.messageCount} messages):\n\n🎧 **Listen here:** ${result.audioUrl}${transcriptPreview}`;
+  } catch (error) {
+    logger.error('Failed to generate podcast', { error });
+    return "I encountered an error while generating the podcast. Please try again later or check the AutoContent API configuration.";
+  }
 }
 
 export async function processDelegatedTaskResponse(

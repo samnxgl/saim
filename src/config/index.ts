@@ -25,6 +25,9 @@ const configSchema = z.object({
   // CEO
   ceoSlackUserId: z.string().min(1),
 
+  // AutoContent API (optional - for podcast generation)
+  autoContentApiKey: z.string().optional(),
+
   // Application
   port: z.number().default(3000),
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
@@ -34,6 +37,9 @@ const configSchema = z.object({
   strategicPlanSyncInterval: z.number().default(60),
   slackHistorySyncInterval: z.number().default(15),
   financialSyncInterval: z.number().default(120),
+
+  // Podcast settings
+  dailyPodcastTime: z.string().default('18:00'), // Time to generate daily podcast (24h format)
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -51,12 +57,14 @@ function loadConfig(): Config {
     strategicPlanDocId: process.env.STRATEGIC_PLAN_DOC_ID,
     databaseUrl: process.env.DATABASE_URL,
     ceoSlackUserId: process.env.CEO_SLACK_USER_ID,
+    autoContentApiKey: process.env.AUTOCONTENT_API_KEY,
     port: parseInt(process.env.PORT || '3000', 10),
     nodeEnv: process.env.NODE_ENV,
     logLevel: process.env.LOG_LEVEL,
     strategicPlanSyncInterval: parseInt(process.env.STRATEGIC_PLAN_SYNC_INTERVAL || '60', 10),
     slackHistorySyncInterval: parseInt(process.env.SLACK_HISTORY_SYNC_INTERVAL || '15', 10),
     financialSyncInterval: parseInt(process.env.FINANCIAL_SYNC_INTERVAL || '120', 10),
+    dailyPodcastTime: process.env.DAILY_PODCAST_TIME || '18:00',
   };
 
   // Log which variables are missing (without exposing values)
