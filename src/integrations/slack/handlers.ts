@@ -1,4 +1,4 @@
-import { App, SayFn } from '@slack/bolt';
+import { App, SayFn, GenericMessageEvent } from '@slack/bolt';
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/index.js';
 import { processMessage, processDelegatedTaskResponse } from '../../assistant/index.js';
@@ -8,15 +8,21 @@ import { eq, and } from 'drizzle-orm';
 export function registerSlackHandlers(app: App): void {
   // Handle direct mentions
   app.event('app_mention', async ({ event, say }) => {
-    logger.info('Received app mention', { user: event.user, channel: event.channel });
+    const userId = event.user;
+    if (!userId) {
+      logger.warn('Received app_mention without user');
+      return;
+    }
+
+    logger.info('Received app mention', { user: userId, channel: event.channel });
 
     try {
       const response = await processMessage({
         text: event.text,
-        userId: event.user,
+        userId,
         channelId: event.channel,
         threadTs: event.thread_ts || event.ts,
-        isCEO: event.user === config.ceoSlackUserId,
+        isCEO: userId === config.ceoSlackUserId,
       });
 
       await say({
@@ -33,26 +39,29 @@ export function registerSlackHandlers(app: App): void {
   });
 
   // Handle direct messages
-  app.event('message', async ({ event, say }) => {
-    // Ignore bot messages and messages without subtype (to avoid duplicates)
-    if ('subtype' in event || 'bot_id' in event) {
+  app.message(async ({ message, say }) => {
+    // Type guard for generic messages (not subtyped)
+    const msg = message as GenericMessageEvent;
+
+    // Ignore bot messages
+    if ('bot_id' in message || 'subtype' in message) {
       return;
     }
 
-    // Only process DMs
-    if (!event.channel.startsWith('D')) {
+    // Only process DMs (channels starting with D)
+    if (!msg.channel.startsWith('D')) {
       return;
     }
 
-    const userId = 'user' in event ? event.user : undefined;
-    const text = 'text' in event ? event.text : '';
-    const ts = 'ts' in event ? event.ts : undefined;
+    const userId = msg.user;
+    const text = msg.text || '';
+    const ts = msg.ts;
 
     if (!userId || !text) {
       return;
     }
 
-    logger.info('Received DM', { user: userId, channel: event.channel });
+    logger.info('Received DM', { user: userId, channel: msg.channel });
 
     try {
       const isCEO = userId === config.ceoSlackUserId;
@@ -69,7 +78,7 @@ export function registerSlackHandlers(app: App): void {
       const response = await processMessage({
         text,
         userId,
-        channelId: event.channel,
+        channelId: msg.channel,
         threadTs: ts,
         isCEO,
       });
@@ -188,10 +197,10 @@ async function handleDelegatedTaskResponse(
 
 async function handleButtonAction(
   actionId: string,
-  userId: string
+  _userId: string
 ): Promise<string> {
   // Handle various button actions
-  const [, action, ...params] = actionId.split('_');
+  const [, action] = actionId.split('_');
 
   switch (action) {
     case 'confirm':
