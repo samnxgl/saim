@@ -1,7 +1,7 @@
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 
-const API_BASE_URL = 'https://api.autocontentapi.com/v1';
+const API_BASE_URL = 'https://api.autocontentapi.com';
 
 export interface CreatePodcastRequest {
   resources: Array<{
@@ -101,7 +101,7 @@ export async function getPodcastStatus(requestId: string): Promise<PodcastStatus
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/Content/Status/${requestId}`, {
+    const response = await fetch(`${API_BASE_URL}/content/status/${requestId}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${config.autoContentApiKey}`,
