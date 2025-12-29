@@ -1,7 +1,7 @@
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 
-const API_BASE_URL = 'https://api.autocontentapi.com';
+const API_BASE_URL = 'https://api.autocontentapi.com/v1';
 
 export interface CreatePodcastRequest {
   resources: Array<{
@@ -13,15 +13,18 @@ export interface CreatePodcastRequest {
 }
 
 export interface CreatePodcastResponse {
-  request_id: string;
+  contentId?: string;
+  request_id?: string;
   error_message?: string;
 }
 
 export interface PodcastStatusResponse {
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | number;
+  audioUrl?: string;
   audio_url?: string;
   transcript?: string;
   error_message?: string;
+  errorMessage?: string;
 }
 
 export async function createPodcast(
@@ -49,7 +52,7 @@ export async function createPodcast(
   });
 
   try {
-    const response = await fetch(`${API_BASE_URL}/content/Create`, {
+    const response = await fetch(`${API_BASE_URL}/Content/Create`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${config.autoContentApiKey}`,
@@ -59,23 +62,33 @@ export async function createPodcast(
       body: JSON.stringify(requestBody),
     });
 
+    const responseText = await response.text();
+    logger.info('AutoContent API response', {
+      status: response.status,
+      body: responseText.slice(0, 500),
+    });
+
     if (!response.ok) {
-      const errorText = await response.text();
       logger.error('AutoContent API error', {
         status: response.status,
-        error: errorText,
+        error: responseText,
       });
-      throw new Error(`AutoContent API error: ${response.status} - ${errorText}`);
+      throw new Error(`AutoContent API error: ${response.status} - ${responseText}`);
     }
 
-    const result = await response.json() as CreatePodcastResponse;
+    const result = JSON.parse(responseText) as CreatePodcastResponse;
 
     if (result.error_message) {
       throw new Error(`AutoContent API error: ${result.error_message}`);
     }
 
-    logger.info('Podcast creation initiated', { requestId: result.request_id });
-    return result;
+    const requestId = result.contentId || result.request_id;
+    if (!requestId) {
+      throw new Error('No contentId or request_id in AutoContent API response');
+    }
+
+    logger.info('Podcast creation initiated', { requestId });
+    return { request_id: requestId, contentId: requestId };
   } catch (error) {
     logger.error('Failed to create podcast', { error });
     throw error;
@@ -88,7 +101,7 @@ export async function getPodcastStatus(requestId: string): Promise<PodcastStatus
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/content/Status/${requestId}`, {
+    const response = await fetch(`${API_BASE_URL}/Content/Status/${requestId}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${config.autoContentApiKey}`,
@@ -96,12 +109,17 @@ export async function getPodcastStatus(requestId: string): Promise<PodcastStatus
       },
     });
 
+    const responseText = await response.text();
+    logger.debug('AutoContent status response', {
+      status: response.status,
+      body: responseText.slice(0, 500),
+    });
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`AutoContent API error: ${response.status} - ${errorText}`);
+      throw new Error(`AutoContent API error: ${response.status} - ${responseText}`);
     }
 
-    const result = await response.json() as PodcastStatusResponse;
+    const result = JSON.parse(responseText) as PodcastStatusResponse;
     return result;
   } catch (error) {
     logger.error('Failed to get podcast status', { error, requestId });
@@ -119,13 +137,19 @@ export async function waitForPodcastCompletion(
   while (Date.now() - startTime < maxWaitMs) {
     const status = await getPodcastStatus(requestId);
 
-    if (status.status === 'completed') {
-      logger.info('Podcast generation completed', { requestId, audioUrl: status.audio_url });
-      return status;
+    // Handle both numeric (100 = completed) and string status formats
+    const isCompleted = status.status === 'completed' || status.status === 100;
+    const isFailed = status.status === 'failed';
+    const audioUrl = status.audioUrl || status.audio_url;
+
+    if (isCompleted && audioUrl) {
+      logger.info('Podcast generation completed', { requestId, audioUrl });
+      return { ...status, audio_url: audioUrl };
     }
 
-    if (status.status === 'failed') {
-      throw new Error(`Podcast generation failed: ${status.error_message}`);
+    if (isFailed) {
+      const errorMsg = status.error_message || status.errorMessage || 'Unknown error';
+      throw new Error(`Podcast generation failed: ${errorMsg}`);
     }
 
     logger.debug('Podcast still processing', { requestId, status: status.status });

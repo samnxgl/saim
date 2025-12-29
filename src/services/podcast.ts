@@ -156,8 +156,12 @@ export async function generateDailyPodcast(
     );
 
     // Wait for podcast to complete (this may take several minutes)
-    logger.info('Waiting for podcast generation to complete', { requestId: createResponse.request_id });
-    const statusResponse = await waitForPodcastCompletion(createResponse.request_id);
+    const requestId = createResponse.request_id || createResponse.contentId;
+    if (!requestId) {
+      throw new Error('No request ID returned from AutoContent API');
+    }
+    logger.info('Waiting for podcast generation to complete', { requestId });
+    const statusResponse = await waitForPodcastCompletion(requestId);
 
     return {
       success: true,
