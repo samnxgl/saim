@@ -47,6 +47,7 @@ export const slackMessages = pgTable('slack_messages', {
   timestamp: varchar('timestamp', { length: 50 }).notNull(),
   threadTs: varchar('thread_ts', { length: 50 }),
   isDirectMessage: boolean('is_direct_message').default(false).notNull(),
+  slackCreatedAt: timestamp('slack_created_at'), // Actual time the message was sent on Slack
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

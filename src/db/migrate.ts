@@ -64,8 +64,12 @@ async function migrate() {
         timestamp VARCHAR(50) NOT NULL,
         thread_ts VARCHAR(50),
         is_direct_message BOOLEAN DEFAULT FALSE NOT NULL,
+        slack_created_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
+
+      -- Add slack_created_at column if it doesn't exist (for existing databases)
+      ALTER TABLE slack_messages ADD COLUMN IF NOT EXISTS slack_created_at TIMESTAMP;
 
       CREATE TABLE IF NOT EXISTS conversation_contexts (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -167,6 +171,7 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_slack_messages_channel ON slack_messages(channel_id);
       CREATE INDEX IF NOT EXISTS idx_slack_messages_user ON slack_messages(user_id);
       CREATE INDEX IF NOT EXISTS idx_slack_messages_timestamp ON slack_messages(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_slack_messages_slack_created_at ON slack_messages(slack_created_at);
       CREATE INDEX IF NOT EXISTS idx_conversation_contexts_user_channel ON conversation_contexts(user_id, channel_id);
       CREATE INDEX IF NOT EXISTS idx_delegated_tasks_status ON delegated_tasks(status);
       CREATE INDEX IF NOT EXISTS idx_communication_patterns_type ON communication_patterns(type);

@@ -57,6 +57,9 @@ async function syncChannelMessages(
 
       const userName = await resolveUserName(message.user);
 
+      // Convert Slack timestamp to Date (format: "1234567890.123456")
+      const slackCreatedAt = new Date(parseFloat(message.ts) * 1000);
+
       await db
         .insert(schema.slackMessages)
         .values({
@@ -69,6 +72,7 @@ async function syncChannelMessages(
           timestamp: message.ts,
           threadTs: message.thread_ts || null,
           isDirectMessage: false,
+          slackCreatedAt,
         })
         .onConflictDoNothing();
     }
@@ -95,6 +99,9 @@ async function syncDMMessages(channelId: string): Promise<void> {
 
       const userName = await resolveUserName(message.user);
 
+      // Convert Slack timestamp to Date (format: "1234567890.123456")
+      const slackCreatedAt = new Date(parseFloat(message.ts) * 1000);
+
       await db
         .insert(schema.slackMessages)
         .values({
@@ -107,6 +114,7 @@ async function syncDMMessages(channelId: string): Promise<void> {
           timestamp: message.ts,
           threadTs: message.thread_ts || null,
           isDirectMessage: true,
+          slackCreatedAt,
         })
         .onConflictDoNothing();
     }

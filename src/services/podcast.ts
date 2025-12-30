@@ -35,20 +35,16 @@ export async function getMessagesForDate(date: Date): Promise<typeof schema.slac
   const dayStart = startOfDay(date);
   const dayEnd = endOfDay(date);
 
-  // Convert to Unix timestamps for comparison with Slack's timestamp format
-  const dayStartUnix = Math.floor(dayStart.getTime() / 1000).toString();
-  const dayEndUnix = Math.floor(dayEnd.getTime() / 1000).toString();
-
   const messages = await db
     .select()
     .from(schema.slackMessages)
     .where(
       and(
-        gte(schema.slackMessages.timestamp, dayStartUnix),
-        lte(schema.slackMessages.timestamp, dayEndUnix)
+        gte(schema.slackMessages.slackCreatedAt, dayStart),
+        lte(schema.slackMessages.slackCreatedAt, dayEnd)
       )
     )
-    .orderBy(schema.slackMessages.timestamp);
+    .orderBy(schema.slackMessages.slackCreatedAt);
 
   return messages;
 }
