@@ -142,3 +142,26 @@ export const financialSheets = pgTable('financial_sheets', {
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// Outbound calls tracking
+export const outboundCalls = pgTable('outbound_calls', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  blandCallId: varchar('bland_call_id', { length: 100 }).notNull().unique(),
+  phoneNumber: varchar('phone_number', { length: 50 }).notNull(),
+  recipientName: varchar('recipient_name', { length: 255 }),
+  task: text('task').notNull(),
+  status: varchar('status', { length: 50 }).notNull().default('queued'),
+  callLength: integer('call_length'), // in seconds
+  recordingUrl: varchar('recording_url', { length: 500 }),
+  transcript: text('transcript'),
+  summary: text('summary'),
+  analysis: jsonb('analysis').$type<Record<string, any>>(),
+  errorMessage: text('error_message'),
+  requestedBy: varchar('requested_by', { length: 50 }).notNull(), // Slack user ID
+  slackChannelId: varchar('slack_channel_id', { length: 50 }),
+  slackThreadTs: varchar('slack_thread_ts', { length: 50 }),
+  notifiedCeo: boolean('notified_ceo').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+});

@@ -19,6 +19,12 @@ import {
   parseSlackMessageLink,
 } from '../services/podcast.js';
 import { isAutoContentConfigured } from '../integrations/autocontent/index.js';
+import {
+  initiateCall,
+  extractPhoneNumber,
+  extractRecipientName,
+} from '../services/calling.js';
+import { isBlandConfigured } from '../integrations/bland/index.js';
 
 export interface ProcessMessageInput {
   text: string;
@@ -65,7 +71,7 @@ export async function processMessage(input: ProcessMessageInput): Promise<string
 
   // Check for special commands if CEO
   if (input.isCEO) {
-    const commandResult = await handleCEOCommands(input.text, fullContext);
+    const commandResult = await handleCEOCommands(input.text, fullContext, input);
     if (commandResult) {
       return commandResult;
     }
@@ -93,9 +99,17 @@ export async function processMessage(input: ProcessMessageInput): Promise<string
 
 async function handleCEOCommands(
   text: string,
-  context: Awaited<ReturnType<typeof buildFullContext>>
+  context: Awaited<ReturnType<typeof buildFullContext>>,
+  input: ProcessMessageInput
 ): Promise<string | null> {
   const lowerText = text.toLowerCase();
+
+  // Handle call command - check before delegation since "call" might match delegation patterns
+  const callPatterns = ['call ', 'phone ', 'ring ', 'dial ', 'make a call', 'place a call'];
+  const isCall = callPatterns.some(pattern => lowerText.includes(pattern));
+  if (isCall) {
+    return handleCallCommand(text, input);
+  }
 
   // Handle delegation command - expanded patterns
   const delegationPatterns = [
@@ -386,6 +400,75 @@ async function handlePodcastCommand(text: string): Promise<string> {
   } catch (error) {
     logger.error('Failed to generate podcast', { error });
     return "I encountered an error while generating the podcast. Please try again later or check the AutoContent API configuration.";
+  }
+}
+
+async function handleCallCommand(text: string, input: ProcessMessageInput): Promise<string> {
+  // Check if Bland AI is configured
+  if (!isBlandConfigured()) {
+    return "Outbound calling isn't configured yet. Please set the BLAND_API_KEY environment variable to enable phone calls.";
+  }
+
+  try {
+    // Extract phone number from text
+    const phoneNumber = extractPhoneNumber(text);
+    if (!phoneNumber) {
+      return "I couldn't find a phone number in your request. Please include the phone number you'd like me to call, for example: 'Call +1 555-123-4567 and ask about the project status.'";
+    }
+
+    // Extract recipient name if mentioned
+    const recipientName = extractRecipientName(text);
+
+    // Extract the task/instructions - everything after common patterns
+    let task = text;
+    const taskPatterns = [
+      /call\s+(?:[^,]+,?\s+)?(?:and\s+)?(.+)/i,
+      /phone\s+(?:[^,]+,?\s+)?(?:and\s+)?(.+)/i,
+      /dial\s+(?:[^,]+,?\s+)?(?:and\s+)?(.+)/i,
+      /to\s+(?:ask|discuss|talk about|inquire about|find out|check on|follow up on)\s+(.+)/i,
+    ];
+
+    for (const pattern of taskPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        task = match[1].trim();
+        break;
+      }
+    }
+
+    // If no specific task extracted, use the full text minus the phone number
+    if (task === text) {
+      task = text.replace(phoneNumber, '').replace(/call|phone|dial|ring/gi, '').trim();
+    }
+
+    if (!task || task.length < 5) {
+      return `I found the phone number ${phoneNumber}, but I need more specific instructions. What would you like me to discuss or ask about during the call?`;
+    }
+
+    logger.info('Initiating call from command', {
+      phoneNumber,
+      recipientName,
+      task: task.slice(0, 100),
+    });
+
+    // Initiate the call
+    const result = await initiateCall({
+      phoneNumber,
+      recipientName: recipientName || undefined,
+      task,
+      requestedBy: input.userId,
+      slackChannelId: input.channelId,
+      slackThreadTs: input.threadTs,
+    });
+
+    if (!result.success) {
+      return `I wasn't able to initiate the call. ${result.error || 'Please try again.'}`;
+    }
+
+    return `I'm now calling ${recipientName || phoneNumber}. I'll carry out your instructions and report back here when the call is complete.\n\n**Instructions:** ${task}`;
+  } catch (error) {
+    logger.error('Failed to handle call command', { error });
+    return "I encountered an error while trying to initiate the call. Please try again or verify the phone number format.";
   }
 }
 

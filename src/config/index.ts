@@ -28,6 +28,10 @@ const configSchema = z.object({
   // AutoContent API (optional - for podcast generation)
   autoContentApiKey: z.string().optional(),
 
+  // Bland AI (optional - for outbound calling)
+  blandApiKey: z.string().optional(),
+  blandWebhookSecret: z.string().optional(),
+
   // Application
   port: z.number().default(3000),
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
@@ -58,6 +62,8 @@ function loadConfig(): Config {
     databaseUrl: process.env.DATABASE_URL,
     ceoSlackUserId: process.env.CEO_SLACK_USER_ID,
     autoContentApiKey: process.env.AUTOCONTENT_API_KEY,
+    blandApiKey: process.env.BLAND_API_KEY,
+    blandWebhookSecret: process.env.BLAND_WEBHOOK_SECRET,
     port: parseInt(process.env.PORT || '3000', 10),
     nodeEnv: process.env.NODE_ENV,
     logLevel: process.env.LOG_LEVEL,
