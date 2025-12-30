@@ -232,18 +232,18 @@ async function handleDelegation(
 
   // Generate a proper opening message using Claude
   const openingResponse = await chat(
-    `You are Saim, the CEO's executive assistant. Generate a brief, friendly opening message to a team member. You need to:
+    `You are Saim, Sam's executive assistant. Generate a brief, friendly opening message to a team member. You need to:
 1. Greet them by first name
-2. Explain you're reaching out on behalf of the CEO
-3. Ask the specific question or make the specific request the CEO wanted
-4. Keep it concise and professional
+2. Explain you're reaching out on behalf of Sam
+3. Ask the specific question or make the specific request Sam wanted
+4. Keep it clear, polite, and efficient
 
 Do NOT include any prefixes like "CONTINUE:" or formatting - just write the message directly.`,
     [
       {
         role: 'user',
         content: `Team member's name: ${directReport.name}
-CEO's request: ${instruction}
+Sam's request: ${instruction}
 
 Write the opening message:`,
       },
@@ -553,7 +553,7 @@ export async function processDelegatedTaskResponse(
     [
       {
         role: 'user',
-        content: `**Conversation with ${directReportName}:**\n\n${conversationText}\n\nBased on this conversation, determine your next response. Use CONTINUE if you need more information, or COMPLETE if you have everything the CEO asked for.`,
+        content: `**Conversation with ${directReportName}:**\n\n${conversationText}\n\nBased on this conversation, determine your next response. Use CONTINUE if you need more information, or COMPLETE if you have everything Sam asked for.`,
       },
     ],
     { temperature: 0.5 }
@@ -571,7 +571,7 @@ export async function processDelegatedTaskResponse(
     const summaryMatch = responseContent.match(/SUMMARY:\s*(.+)$/s);
 
     const closingMessage = completeMatch?.[1]?.trim() ||
-      `Thank you, ${directReportFirstName}! I have what I need and will update the CEO.`;
+      `Thank you, ${directReportFirstName}! I have what I need and will update Sam.`;
     const summary = summaryMatch?.[1]?.trim() ||
       `Conversation with ${directReportName} regarding: ${task.instruction}`;
 
@@ -594,16 +594,16 @@ export async function processDelegatedTaskResponse(
       })
       .where(eq(schema.delegatedTasks.id, task.id));
 
-    // Notify CEO of completion
+    // Notify Sam of completion
     try {
-      const ceoMessage = `**Task Completed: Conversation with ${directReportName}**\n\n` +
+      const completionMessage = `**Task Completed: Conversation with ${directReportName}**\n\n` +
         `**Original Request:**\n${task.instruction}\n\n` +
         `**Summary:**\n${summary}`;
 
-      await sendDirectMessage(config.ceoSlackUserId, ceoMessage);
-      logger.info('CEO notified of task completion', { taskId: task.id });
+      await sendDirectMessage(config.ceoSlackUserId, completionMessage);
+      logger.info('Sam notified of task completion', { taskId: task.id });
     } catch (error) {
-      logger.error('Failed to notify CEO of task completion', { taskId: task.id, error });
+      logger.error('Failed to notify Sam of task completion', { taskId: task.id, error });
     }
 
     return {
@@ -621,7 +621,7 @@ export async function processDelegatedTaskResponse(
       if (responseContent.includes('?')) {
         followUp = responseContent;
       } else {
-        followUp = `Thank you for that information. Could you please provide any additional details about what the CEO asked: "${task.instruction.slice(0, 100)}..."?`;
+        followUp = `Thank you for that information. Could you please provide any additional details about what Sam asked: "${task.instruction.slice(0, 100)}..."?`;
       }
     }
 

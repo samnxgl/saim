@@ -100,7 +100,7 @@ export function registerSlackHandlers(app: App): void {
         if (isDirectReport) {
           logger.info('Direct report message but no pending task', { userId });
           await say({
-            text: "Hi! I don't have any active tasks to discuss with you at the moment. If the CEO needs something, I'll reach out.",
+            text: "Hi! I don't have any active tasks to discuss with you at the moment. If Sam needs something, I'll reach out.",
             thread_ts: threadTs || ts,
           });
           return;
