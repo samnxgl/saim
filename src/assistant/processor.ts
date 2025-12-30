@@ -10,6 +10,7 @@ import {
 import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/index.js';
 import { sendDirectMessage } from '../integrations/slack/client.js';
 import {
   generateDailyPodcast,
@@ -229,8 +230,28 @@ async function handleDelegation(
     })
     .returning();
 
-  // Send initial message to the direct report
-  const initialMessage = `Hi ${directReport.name.split(' ')[0]}, I'm reaching out on behalf of the CEO. ${instruction}\n\nPlease respond here when you have a moment.`;
+  // Generate a proper opening message using Claude
+  const openingResponse = await chat(
+    `You are Saim, the CEO's executive assistant. Generate a brief, friendly opening message to a team member. You need to:
+1. Greet them by first name
+2. Explain you're reaching out on behalf of the CEO
+3. Ask the specific question or make the specific request the CEO wanted
+4. Keep it concise and professional
+
+Do NOT include any prefixes like "CONTINUE:" or formatting - just write the message directly.`,
+    [
+      {
+        role: 'user',
+        content: `Team member's name: ${directReport.name}
+CEO's request: ${instruction}
+
+Write the opening message:`,
+      },
+    ],
+    { temperature: 0.7, maxTokens: 500 }
+  );
+
+  const initialMessage = openingResponse.content;
 
   try {
     await sendDirectMessage(directReport.slackUserId, initialMessage);
@@ -502,11 +523,15 @@ export async function processDelegatedTaskResponse(
     .where(eq(schema.directReports.id, task.directReportId))
     .limit(1);
 
-  // Determine if we need to continue the conversation or wrap up
+  const directReportName = directReport?.name || 'Team Member';
+  const directReportFirstName = directReportName.split(' ')[0];
+
+  // Build conversation text for context
   const conversationText = updatedHistory
-    .map((h) => `${h.role === 'saim' ? 'Saim' : directReport?.name || 'Team Member'}: ${h.message}`)
+    .map((h) => `${h.role === 'saim' ? 'Saim' : directReportName}: ${h.message}`)
     .join('\n\n');
 
+  // Use the task delegation prompt
   const systemPrompt = getSystemPrompt('taskDelegation', {
     TASK_INSTRUCTION: task.instruction,
   });
@@ -516,52 +541,77 @@ export async function processDelegatedTaskResponse(
     [
       {
         role: 'user',
-        content: `Here is the conversation so far:\n\n${conversationText}\n\nBased on the original task and this conversation, should we continue gathering information or is the task complete? If continuing, what should we ask next? If complete, prepare the summary for the CEO.`,
+        content: `Here is the conversation so far:\n\n${conversationText}\n\nAnalyze this conversation and determine whether the CEO's request has been fulfilled. Respond with either CONTINUE or COMPLETE as specified in your instructions.`,
       },
     ],
     { temperature: 0.5 }
   );
 
-  // Check if the task seems complete
-  const isComplete = analysisResponse.content.toLowerCase().includes('task complete') ||
-    analysisResponse.content.toLowerCase().includes('summary for the ceo');
+  const responseContent = analysisResponse.content;
+  logger.info('Task delegation AI response', { response: responseContent.slice(0, 200) });
+
+  // Parse the response - check for COMPLETE first
+  const isComplete = responseContent.includes('COMPLETE:');
 
   if (isComplete) {
-    // Generate summary
-    const summaryResponse = await chat(
-      'You are preparing a concise summary for the CEO. Summarize the key findings and any action items.',
-      [
-        {
-          role: 'user',
-          content: `Task: ${task.instruction}\n\nConversation:\n${conversationText}\n\nProvide a brief summary for the CEO.`,
-        },
-      ],
-      { temperature: 0.3 }
-    );
+    // Extract the closing message and summary
+    const completeMatch = responseContent.match(/COMPLETE:\s*(.+?)(?=SUMMARY:|$)/s);
+    const summaryMatch = responseContent.match(/SUMMARY:\s*(.+)$/s);
+
+    const closingMessage = completeMatch?.[1]?.trim() ||
+      `Thank you, ${directReportFirstName}! I have what I need and will update the CEO.`;
+    const summary = summaryMatch?.[1]?.trim() ||
+      `Conversation with ${directReportName} regarding: ${task.instruction}`;
 
     // Update task as completed
     await db
       .update(schema.delegatedTasks)
       .set({
-        conversationHistory: updatedHistory,
+        conversationHistory: [
+          ...updatedHistory,
+          {
+            role: 'saim' as const,
+            message: closingMessage,
+            timestamp: new Date().toISOString(),
+          },
+        ],
         status: 'completed',
-        summary: summaryResponse.content,
+        summary,
         completedAt: new Date(),
+        ceoNotified: true,
       })
       .where(eq(schema.delegatedTasks.id, task.id));
 
-    // TODO: Notify CEO of completion
+    // Notify CEO of completion
+    try {
+      const ceoMessage = `**Task Completed: Conversation with ${directReportName}**\n\n` +
+        `**Original Request:**\n${task.instruction}\n\n` +
+        `**Summary:**\n${summary}`;
+
+      await sendDirectMessage(config.ceoSlackUserId, ceoMessage);
+      logger.info('CEO notified of task completion', { taskId: task.id });
+    } catch (error) {
+      logger.error('Failed to notify CEO of task completion', { taskId: task.id, error });
+    }
 
     return {
-      message: `Thank you, ${directReport?.name.split(' ')[0] || 'team member'}! I have what I need and will update the CEO.`,
+      message: closingMessage,
       completed: true,
     };
   } else {
-    // Extract follow-up question from analysis
-    const followUpMatch = analysisResponse.content.match(/(?:ask|follow.?up|next question)[:\s]*(.+)/i);
-    const followUp = followUpMatch
-      ? followUpMatch[1].trim()
-      : 'Could you provide any additional details?';
+    // Extract the continue message
+    const continueMatch = responseContent.match(/CONTINUE:\s*(.+?)$/s);
+    let followUp = continueMatch?.[1]?.trim();
+
+    // Fallback if we couldn't parse the format
+    if (!followUp) {
+      // Try to use the response content directly if it seems like a question
+      if (responseContent.includes('?')) {
+        followUp = responseContent;
+      } else {
+        followUp = `Thank you for that information. Could you please provide any additional details about what the CEO asked: "${task.instruction.slice(0, 100)}..."?`;
+      }
+    }
 
     // Update history with Saim's response
     const finalHistory = [
