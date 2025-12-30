@@ -29,22 +29,26 @@ export interface DailyPodcastResult {
 }
 
 /**
- * Get all Slack messages for a specific date
+ * Get all Slack messages for a specific date (using actual Slack message timestamp)
  */
 export async function getMessagesForDate(date: Date): Promise<typeof schema.slackMessages.$inferSelect[]> {
   const dayStart = startOfDay(date);
   const dayEnd = endOfDay(date);
+
+  // Convert to Unix timestamps for comparison with Slack's timestamp format
+  const dayStartUnix = Math.floor(dayStart.getTime() / 1000).toString();
+  const dayEndUnix = Math.floor(dayEnd.getTime() / 1000).toString();
 
   const messages = await db
     .select()
     .from(schema.slackMessages)
     .where(
       and(
-        gte(schema.slackMessages.createdAt, dayStart),
-        lte(schema.slackMessages.createdAt, dayEnd)
+        gte(schema.slackMessages.timestamp, dayStartUnix),
+        lte(schema.slackMessages.timestamp, dayEndUnix)
       )
     )
-    .orderBy(schema.slackMessages.createdAt);
+    .orderBy(schema.slackMessages.timestamp);
 
   return messages;
 }
@@ -53,10 +57,11 @@ export async function getMessagesForDate(date: Date): Promise<typeof schema.slac
  * Format Slack messages into a readable summary for podcast generation
  */
 export async function formatMessagesForPodcast(
-  messages: typeof schema.slackMessages.$inferSelect[]
+  messages: typeof schema.slackMessages.$inferSelect[],
+  date: Date = new Date()
 ): Promise<string> {
   if (messages.length === 0) {
-    return 'No messages were recorded today.';
+    return 'No messages were recorded for this day.';
   }
 
   // Group messages by channel
@@ -70,7 +75,7 @@ export async function formatMessagesForPodcast(
   }
 
   // Format into readable text
-  let formattedText = `Daily Slack Summary - ${format(new Date(), 'MMMM d, yyyy')}\n\n`;
+  let formattedText = `Daily Slack Summary - ${format(date, 'MMMM d, yyyy')}\n\n`;
   formattedText += `Total messages: ${messages.length}\n`;
   formattedText += `Channels active: ${messagesByChannel.size}\n\n`;
 
@@ -150,8 +155,8 @@ export async function generateDailyPodcast(
 
     logger.info('Retrieved messages for podcast', { count: messages.length });
 
-    // Format messages
-    const formattedMessages = await formatMessagesForPodcast(messages);
+    // Format messages (pass date for accurate header)
+    const formattedMessages = await formatMessagesForPodcast(messages, date);
 
     // Create podcast script using Claude
     logger.info('Creating podcast script with Claude');
