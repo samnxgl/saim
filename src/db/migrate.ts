@@ -142,12 +142,36 @@ async function migrate() {
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS outbound_calls (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        bland_call_id VARCHAR(100) NOT NULL UNIQUE,
+        phone_number VARCHAR(50) NOT NULL,
+        recipient_name VARCHAR(255),
+        task TEXT NOT NULL,
+        status VARCHAR(50) DEFAULT 'queued' NOT NULL,
+        call_length INTEGER,
+        recording_url VARCHAR(500),
+        transcript TEXT,
+        summary TEXT,
+        analysis JSONB,
+        error_message TEXT,
+        requested_by VARCHAR(50) NOT NULL,
+        slack_channel_id VARCHAR(50),
+        slack_thread_ts VARCHAR(50),
+        notified_ceo BOOLEAN DEFAULT FALSE NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_slack_messages_channel ON slack_messages(channel_id);
       CREATE INDEX IF NOT EXISTS idx_slack_messages_user ON slack_messages(user_id);
       CREATE INDEX IF NOT EXISTS idx_slack_messages_timestamp ON slack_messages(timestamp);
       CREATE INDEX IF NOT EXISTS idx_conversation_contexts_user_channel ON conversation_contexts(user_id, channel_id);
       CREATE INDEX IF NOT EXISTS idx_delegated_tasks_status ON delegated_tasks(status);
       CREATE INDEX IF NOT EXISTS idx_communication_patterns_type ON communication_patterns(type);
+      CREATE INDEX IF NOT EXISTS idx_outbound_calls_status ON outbound_calls(status);
+      CREATE INDEX IF NOT EXISTS idx_outbound_calls_requested_by ON outbound_calls(requested_by);
     `);
 
     console.log('Migrations completed successfully!');
