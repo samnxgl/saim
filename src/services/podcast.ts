@@ -3,7 +3,16 @@ import { desc, gte, and, lte } from 'drizzle-orm';
 import { startOfDay, endOfDay, subDays, format } from 'date-fns';
 import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
-import { sendDirectMessage } from '../integrations/slack/client.js';
+import {
+  sendDirectMessage,
+  getMessage,
+  getThreadMessages,
+  getFileInfo,
+  downloadFileContent,
+  getConversationHistory,
+  findChannelByName,
+  getChannelInfo,
+} from '../integrations/slack/client.js';
 import {
   createPodcast,
   waitForPodcastCompletion,
@@ -215,4 +224,309 @@ export async function sendDailyPodcastToCEO(): Promise<void> {
 export async function generateYesterdaysPodcast(): Promise<DailyPodcastResult> {
   const yesterday = subDays(new Date(), 1);
   return generateDailyPodcast(yesterday);
+}
+
+/**
+ * Extract file content from a Slack message
+ */
+async function extractFileContent(files: any[]): Promise<string> {
+  if (!files || files.length === 0) return '';
+
+  const fileContents: string[] = [];
+
+  for (const file of files) {
+    try {
+      const fileInfo = await getFileInfo(file.id);
+      if (!fileInfo) continue;
+
+      let content = `\n[Attachment: ${fileInfo.name || 'unnamed file'}]\n`;
+
+      // Try to get file content if it's text-based
+      if (fileInfo.url_private_download) {
+        const textContent = await downloadFileContent(fileInfo.url_private_download);
+        if (textContent && !textContent.startsWith('[Binary file')) {
+          content += textContent.slice(0, 10000); // Limit content size
+        } else {
+          content += `File type: ${fileInfo.filetype || 'unknown'}, Size: ${fileInfo.size || 'unknown'} bytes`;
+        }
+      } else if (fileInfo.preview) {
+        content += fileInfo.preview;
+      }
+
+      fileContents.push(content);
+    } catch (error) {
+      logger.error('Error extracting file content', { fileId: file.id, error });
+    }
+  }
+
+  return fileContents.join('\n');
+}
+
+/**
+ * Format a single Slack message with its attachments
+ */
+async function formatMessageWithAttachments(message: any, channelName?: string): Promise<string> {
+  let text = message.text || '';
+
+  // Extract file content if present
+  if (message.files && message.files.length > 0) {
+    const fileContent = await extractFileContent(message.files);
+    text += fileContent;
+  }
+
+  // Handle Slack attachments (legacy format)
+  if (message.attachments && message.attachments.length > 0) {
+    for (const attachment of message.attachments) {
+      if (attachment.text) {
+        text += `\n[Attachment]: ${attachment.text}`;
+      }
+      if (attachment.pretext) {
+        text += `\n${attachment.pretext}`;
+      }
+    }
+  }
+
+  const userName = message.user_profile?.display_name || message.user || 'Unknown';
+  const channel = channelName ? `#${channelName}` : '';
+
+  return `${channel ? channel + ' - ' : ''}${userName}: ${text}`;
+}
+
+export interface CustomPodcastResult {
+  success: boolean;
+  audioUrl?: string;
+  transcript?: string;
+  error?: string;
+  sourceDescription: string;
+}
+
+/**
+ * Generate a podcast from a single Slack message (with thread and attachments)
+ */
+export async function generatePodcastFromMessage(
+  channelId: string,
+  messageTs: string,
+  customInstructions?: string
+): Promise<CustomPodcastResult> {
+  logger.info('Generating podcast from single message', { channelId, messageTs });
+
+  if (!isAutoContentConfigured()) {
+    return {
+      success: false,
+      error: 'AutoContent API is not configured.',
+      sourceDescription: 'single message',
+    };
+  }
+
+  try {
+    // Get the main message
+    const mainMessage = await getMessage(channelId, messageTs);
+    if (!mainMessage) {
+      return {
+        success: false,
+        error: 'Could not find the specified message.',
+        sourceDescription: 'single message',
+      };
+    }
+
+    // Get channel info for context
+    const channelInfo = await getChannelInfo(channelId);
+    const channelName = (channelInfo as any)?.name || 'unknown-channel';
+
+    // Format the main message
+    let content = await formatMessageWithAttachments(mainMessage, channelName);
+
+    // Get thread replies if this is a thread parent
+    if (mainMessage.thread_ts === mainMessage.ts || mainMessage.reply_count) {
+      const threadMessages = await getThreadMessages(channelId, mainMessage.ts as string);
+      for (const threadMsg of threadMessages) {
+        if (threadMsg.ts !== mainMessage.ts) {
+          const formatted = await formatMessageWithAttachments(threadMsg);
+          content += `\n\nReply: ${formatted}`;
+        }
+      }
+    }
+
+    logger.info('Message content extracted', { contentLength: content.length });
+
+    // Create podcast script
+    const scriptPrompt = customInstructions ||
+      'Create an informative podcast episode discussing this message and its context. Focus on the key points and any decisions or actions mentioned.';
+
+    const podcastScript = await chat(
+      `You are creating a podcast script from a specific Slack message. ${scriptPrompt}`,
+      [{ role: 'user', content: `Create a podcast script from this message:\n\n${content}` }],
+      { maxTokens: 4096, temperature: 0.7 }
+    );
+
+    // Generate audio
+    const createResponse = await createPodcast(
+      podcastScript.content,
+      customInstructions ||
+        'Create an engaging podcast episode with two hosts discussing this content. Make it informative yet conversational.'
+    );
+
+    const requestId = createResponse.request_id || createResponse.contentId;
+    if (!requestId) {
+      throw new Error('No request ID returned from AutoContent API');
+    }
+
+    const statusResponse = await waitForPodcastCompletion(requestId);
+
+    return {
+      success: true,
+      audioUrl: statusResponse.audio_url,
+      transcript: statusResponse.transcript,
+      sourceDescription: `message from #${channelName}`,
+    };
+  } catch (error) {
+    logger.error('Failed to generate podcast from message', { error });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      sourceDescription: 'single message',
+    };
+  }
+}
+
+/**
+ * Generate a podcast from messages in a specific channel
+ */
+export async function generatePodcastFromChannel(
+  channelIdentifier: string, // Can be channel ID or name
+  options: {
+    customInstructions?: string;
+    messageCount?: number;
+    startTime?: Date;
+    endTime?: Date;
+  } = {}
+): Promise<CustomPodcastResult> {
+  logger.info('Generating podcast from channel', { channelIdentifier, options });
+
+  if (!isAutoContentConfigured()) {
+    return {
+      success: false,
+      error: 'AutoContent API is not configured.',
+      sourceDescription: `channel ${channelIdentifier}`,
+    };
+  }
+
+  try {
+    // Resolve channel ID if name was provided
+    let channelId = channelIdentifier;
+    let channelName = channelIdentifier;
+
+    if (!channelIdentifier.startsWith('C') && !channelIdentifier.startsWith('D')) {
+      const foundChannelId = await findChannelByName(channelIdentifier);
+      if (!foundChannelId) {
+        return {
+          success: false,
+          error: `Could not find channel "${channelIdentifier}".`,
+          sourceDescription: `channel ${channelIdentifier}`,
+        };
+      }
+      channelId = foundChannelId;
+      channelName = channelIdentifier.replace(/^#/, '');
+    } else {
+      const channelInfo = await getChannelInfo(channelId);
+      channelName = (channelInfo as any)?.name || channelId;
+    }
+
+    // Build time filters
+    const oldest = options.startTime
+      ? (options.startTime.getTime() / 1000).toString()
+      : undefined;
+    const latest = options.endTime
+      ? (options.endTime.getTime() / 1000).toString()
+      : undefined;
+
+    // Get messages from channel
+    const messages = await getConversationHistory(channelId, {
+      limit: options.messageCount || 50,
+      oldest,
+      latest,
+    });
+
+    if (messages.length === 0) {
+      return {
+        success: false,
+        error: 'No messages found in the specified channel/timeframe.',
+        sourceDescription: `#${channelName}`,
+      };
+    }
+
+    // Format all messages with attachments
+    const formattedMessages: string[] = [];
+    for (const msg of messages.reverse()) {
+      const formatted = await formatMessageWithAttachments(msg as any);
+      formattedMessages.push(formatted);
+    }
+
+    const content = `Channel: #${channelName}\nMessages: ${messages.length}\n\n${formattedMessages.join('\n\n')}`;
+
+    logger.info('Channel content extracted', {
+      channelName,
+      messageCount: messages.length,
+      contentLength: content.length,
+    });
+
+    // Create podcast script
+    const scriptPrompt = options.customInstructions ||
+      `Create an engaging podcast summarizing the discussions in #${channelName}. Highlight key topics, decisions, and action items.`;
+
+    const podcastScript = await chat(
+      `You are creating a podcast script from Slack channel messages. ${scriptPrompt}`,
+      [{ role: 'user', content: `Create a podcast script from these messages:\n\n${content}` }],
+      { maxTokens: 4096, temperature: 0.7 }
+    );
+
+    // Generate audio
+    const createResponse = await createPodcast(
+      podcastScript.content,
+      options.customInstructions ||
+        'Create an engaging podcast episode with two hosts discussing this content. Make it informative yet conversational, like a team standup summary.'
+    );
+
+    const requestId = createResponse.request_id || createResponse.contentId;
+    if (!requestId) {
+      throw new Error('No request ID returned from AutoContent API');
+    }
+
+    const statusResponse = await waitForPodcastCompletion(requestId);
+
+    return {
+      success: true,
+      audioUrl: statusResponse.audio_url,
+      transcript: statusResponse.transcript,
+      sourceDescription: `#${channelName} (${messages.length} messages)`,
+    };
+  } catch (error) {
+    logger.error('Failed to generate podcast from channel', { error });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      sourceDescription: `channel ${channelIdentifier}`,
+    };
+  }
+}
+
+/**
+ * Parse a Slack message link to extract channel ID and message timestamp
+ * Formats: https://workspace.slack.com/archives/C123/p1234567890123456
+ */
+export function parseSlackMessageLink(link: string): { channelId: string; messageTs: string } | null {
+  try {
+    // Match Slack message URL pattern
+    const match = link.match(/archives\/([A-Z0-9]+)\/p(\d+)/i);
+    if (!match) return null;
+
+    const channelId = match[1];
+    // Convert Slack's p-format timestamp to standard format (add decimal point)
+    const rawTs = match[2];
+    const messageTs = rawTs.slice(0, 10) + '.' + rawTs.slice(10);
+
+    return { channelId, messageTs };
+  } catch {
+    return null;
+  }
 }

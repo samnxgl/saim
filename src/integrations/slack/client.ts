@@ -162,3 +162,101 @@ export async function listDirectMessageChannels() {
     return [];
   }
 }
+
+export async function getMessage(channelId: string, messageTs: string) {
+  const client = getWebClient();
+  try {
+    // Get the specific message using conversations.history with inclusive flag
+    const result = await client.conversations.history({
+      channel: channelId,
+      latest: messageTs,
+      oldest: messageTs,
+      inclusive: true,
+      limit: 1,
+    });
+    return result.messages?.[0] || null;
+  } catch (error) {
+    logger.error('Failed to get message', { channelId, messageTs, error });
+    return null;
+  }
+}
+
+export async function getThreadMessages(channelId: string, threadTs: string) {
+  const client = getWebClient();
+  try {
+    const result = await client.conversations.replies({
+      channel: channelId,
+      ts: threadTs,
+      limit: 100,
+    });
+    return result.messages || [];
+  } catch (error) {
+    logger.error('Failed to get thread messages', { channelId, threadTs, error });
+    return [];
+  }
+}
+
+export async function getFileInfo(fileId: string) {
+  const client = getWebClient();
+  try {
+    const result = await client.files.info({ file: fileId });
+    return result.file || null;
+  } catch (error) {
+    logger.error('Failed to get file info', { fileId, error });
+    return null;
+  }
+}
+
+export async function downloadFileContent(fileUrl: string): Promise<string | null> {
+  try {
+    const response = await fetch(fileUrl, {
+      headers: {
+        'Authorization': `Bearer ${config.slackBotToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      logger.error('Failed to download file', { status: response.status });
+      return null;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+
+    // Only handle text-based files
+    if (contentType.includes('text') ||
+        contentType.includes('json') ||
+        contentType.includes('javascript') ||
+        contentType.includes('xml') ||
+        contentType.includes('csv')) {
+      return await response.text();
+    }
+
+    // For PDFs and other binary files, return metadata instead
+    return `[Binary file: ${contentType}]`;
+  } catch (error) {
+    logger.error('Failed to download file content', { fileUrl, error });
+    return null;
+  }
+}
+
+export async function findChannelByName(channelName: string): Promise<string | null> {
+  const client = getWebClient();
+  try {
+    // Remove # prefix if present
+    const name = channelName.replace(/^#/, '');
+
+    const result = await client.conversations.list({
+      types: 'public_channel,private_channel',
+      limit: 1000,
+    });
+
+    const channel = result.channels?.find(
+      c => c.name?.toLowerCase() === name.toLowerCase()
+    );
+
+    return channel?.id || null;
+  } catch (error) {
+    logger.error('Failed to find channel by name', { channelName, error });
+    return null;
+  }
+}

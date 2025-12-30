@@ -11,7 +11,13 @@ import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 import { sendDirectMessage } from '../integrations/slack/client.js';
-import { generateDailyPodcast, generateYesterdaysPodcast } from '../services/podcast.js';
+import {
+  generateDailyPodcast,
+  generateYesterdaysPodcast,
+  generatePodcastFromMessage,
+  generatePodcastFromChannel,
+  parseSlackMessageLink,
+} from '../services/podcast.js';
 import { isAutoContentConfigured } from '../integrations/autocontent/index.js';
 
 export interface ProcessMessageInput {
@@ -271,6 +277,83 @@ async function handlePodcastCommand(text: string): Promise<string> {
   const lowerText = text.toLowerCase();
 
   try {
+    // Check for Slack message link - create podcast from specific message
+    const slackLinkMatch = text.match(/https:\/\/[^\s]+\.slack\.com\/archives\/[A-Z0-9]+\/p\d+/i);
+    if (slackLinkMatch) {
+      const parsed = parseSlackMessageLink(slackLinkMatch[0]);
+      if (parsed) {
+        logger.info('Generating podcast from specific message', parsed);
+
+        // Extract custom instructions (everything after the link, or before it)
+        let customInstructions: string | undefined;
+        const instructionMatch = text.match(/(?:focus(?:ing)? on|about|covering|discussing|highlight(?:ing)?|emphasiz(?:e|ing))[:\s]+(.+?)(?:$|https:)/i);
+        if (instructionMatch) {
+          customInstructions = instructionMatch[1].trim();
+        } else {
+          // Try to find instructions after common phrases
+          const afterLink = text.slice(text.indexOf(slackLinkMatch[0]) + slackLinkMatch[0].length).trim();
+          const beforeLink = text.slice(0, text.indexOf(slackLinkMatch[0])).trim();
+          if (afterLink && afterLink.length > 10) {
+            customInstructions = afterLink;
+          } else if (beforeLink && !beforeLink.toLowerCase().includes('podcast')) {
+            customInstructions = beforeLink;
+          }
+        }
+
+        const result = await generatePodcastFromMessage(
+          parsed.channelId,
+          parsed.messageTs,
+          customInstructions
+        );
+
+        if (!result.success || !result.audioUrl) {
+          return `I wasn't able to generate a podcast from that message. ${result.error || 'Please try again later.'}`;
+        }
+
+        const transcriptPreview = result.transcript
+          ? `\n\n**Transcript preview:**\n${result.transcript.slice(0, 500)}${result.transcript.length > 500 ? '...' : ''}`
+          : '';
+
+        return `Here's your podcast from the ${result.sourceDescription}:\n\n🎧 **Listen here:** ${result.audioUrl}${transcriptPreview}`;
+      }
+    }
+
+    // Check for channel reference - create podcast from channel messages
+    const channelMatch = text.match(/#([a-z0-9_-]+)/i) || text.match(/(?:from|in|channel)\s+([a-z0-9_-]+)/i);
+    if (channelMatch) {
+      const channelName = channelMatch[1];
+      logger.info('Generating podcast from channel', { channelName });
+
+      // Extract custom instructions
+      let customInstructions: string | undefined;
+      const instructionMatch = text.match(/(?:focus(?:ing)? on|about|covering|discussing|highlight(?:ing)?|emphasiz(?:e|ing))[:\s]+(.+?)(?:$|#)/i);
+      if (instructionMatch) {
+        customInstructions = instructionMatch[1].trim();
+      }
+
+      // Check for message count
+      let messageCount = 50;
+      const countMatch = text.match(/(?:last|recent|past)\s+(\d+)\s+messages?/i);
+      if (countMatch) {
+        messageCount = parseInt(countMatch[1], 10);
+      }
+
+      const result = await generatePodcastFromChannel(channelName, {
+        customInstructions,
+        messageCount,
+      });
+
+      if (!result.success || !result.audioUrl) {
+        return `I wasn't able to generate a podcast from ${result.sourceDescription}. ${result.error || 'Please try again later.'}`;
+      }
+
+      const transcriptPreview = result.transcript
+        ? `\n\n**Transcript preview:**\n${result.transcript.slice(0, 500)}${result.transcript.length > 500 ? '...' : ''}`
+        : '';
+
+      return `Here's your podcast from ${result.sourceDescription}:\n\n🎧 **Listen here:** ${result.audioUrl}${transcriptPreview}`;
+    }
+
     // Check if they want yesterday's podcast
     if (lowerText.includes('yesterday')) {
       logger.info('Generating podcast for yesterday');
