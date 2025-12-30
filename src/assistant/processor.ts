@@ -8,7 +8,7 @@ import {
   getDirectReportContext,
 } from './context.js';
 import { db, schema } from '../db/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
 import { sendDirectMessage } from '../integrations/slack/client.js';
@@ -219,7 +219,20 @@ async function handleDelegation(
     return `I couldn't find a direct report matching "${targetName}". Available direct reports: ${availableNames}`;
   }
 
-  // Create the delegated task
+  // Cancel any existing in-progress tasks for this direct report to avoid context bleeding
+  await db
+    .update(schema.delegatedTasks)
+    .set({
+      status: 'cancelled',
+    })
+    .where(
+      and(
+        eq(schema.delegatedTasks.directReportId, directReport.id),
+        eq(schema.delegatedTasks.status, 'in_progress')
+      )
+    );
+
+  // Create the new delegated task
   const [task] = await db
     .insert(schema.delegatedTasks)
     .values({

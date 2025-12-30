@@ -3,7 +3,7 @@ import { logger } from '../../utils/logger.js';
 import { config } from '../../config/index.js';
 import { processMessage, processDelegatedTaskResponse } from '../../assistant/index.js';
 import { db, schema } from '../../db/index.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 
 // Track threads where Saim is active (in-memory for simplicity)
 const activeThreads = new Set<string>();
@@ -195,6 +195,7 @@ async function checkForPendingTask(
     return { pendingTask: null, isDirectReport: false };
   }
 
+  // Get the most recent in-progress task (ordered by creation date)
   const [pendingTask] = await db
     .select()
     .from(schema.delegatedTasks)
@@ -204,6 +205,7 @@ async function checkForPendingTask(
         eq(schema.delegatedTasks.status, 'in_progress')
       )
     )
+    .orderBy(desc(schema.delegatedTasks.createdAt))
     .limit(1);
 
   return { pendingTask: pendingTask || null, isDirectReport: true };
