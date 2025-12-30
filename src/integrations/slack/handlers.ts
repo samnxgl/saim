@@ -89,9 +89,20 @@ export function registerSlackHandlers(app: App): void {
 
       // Check if this is a response to a delegated task (for non-CEO DMs)
       if (!isCEO && isDM) {
-        const pendingTask = await checkForPendingTask(userId);
+        const { pendingTask, isDirectReport } = await checkForPendingTask(userId);
         if (pendingTask) {
+          logger.info('Found pending task for direct report', { taskId: pendingTask.id, userId });
           await handleDelegatedTaskResponse(pendingTask, text, userId, say, ts);
+          return;
+        }
+
+        // If they're a direct report but no pending task, respond simply without loading old context
+        if (isDirectReport) {
+          logger.info('Direct report message but no pending task', { userId });
+          await say({
+            text: "Hi! I don't have any active tasks to discuss with you at the moment. If the CEO needs something, I'll reach out.",
+            thread_ts: threadTs || ts,
+          });
           return;
         }
       }
@@ -173,7 +184,7 @@ export function registerSlackHandlers(app: App): void {
 
 async function checkForPendingTask(
   userId: string
-): Promise<typeof schema.delegatedTasks.$inferSelect | null> {
+): Promise<{ pendingTask: typeof schema.delegatedTasks.$inferSelect | null; isDirectReport: boolean }> {
   const directReport = await db
     .select()
     .from(schema.directReports)
@@ -181,7 +192,7 @@ async function checkForPendingTask(
     .limit(1);
 
   if (directReport.length === 0) {
-    return null;
+    return { pendingTask: null, isDirectReport: false };
   }
 
   const [pendingTask] = await db
@@ -195,7 +206,7 @@ async function checkForPendingTask(
     )
     .limit(1);
 
-  return pendingTask || null;
+  return { pendingTask: pendingTask || null, isDirectReport: true };
 }
 
 async function handleDelegatedTaskResponse(

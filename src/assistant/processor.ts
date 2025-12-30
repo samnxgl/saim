@@ -531,9 +531,21 @@ export async function processDelegatedTaskResponse(
     .map((h) => `${h.role === 'saim' ? 'Saim' : directReportName}: ${h.message}`)
     .join('\n\n');
 
-  // Use the task delegation prompt
+  // Extract the core task from the CEO's instruction (remove "reach out to X and" prefixes)
+  let coreTask = task.instruction;
+  const cleanupPatterns = [
+    /^(?:reach out to|contact|ask|message|talk to|check with)\s+(?:my direct report,?\s*)?(?:\w+(?:\s+\w+)?)\s+(?:and\s+)?/i,
+    /^(?:can you|please|could you)\s+/i,
+  ];
+  for (const pattern of cleanupPatterns) {
+    coreTask = coreTask.replace(pattern, '');
+  }
+  // Capitalize first letter
+  coreTask = coreTask.charAt(0).toUpperCase() + coreTask.slice(1);
+
+  // Use the task delegation prompt with cleaned instruction
   const systemPrompt = getSystemPrompt('taskDelegation', {
-    TASK_INSTRUCTION: task.instruction,
+    TASK_INSTRUCTION: coreTask,
   });
 
   const analysisResponse = await chat(
@@ -541,7 +553,7 @@ export async function processDelegatedTaskResponse(
     [
       {
         role: 'user',
-        content: `Here is the conversation so far:\n\n${conversationText}\n\nAnalyze this conversation and determine whether the CEO's request has been fulfilled. Respond with either CONTINUE or COMPLETE as specified in your instructions.`,
+        content: `**Conversation with ${directReportName}:**\n\n${conversationText}\n\nBased on this conversation, determine your next response. Use CONTINUE if you need more information, or COMPLETE if you have everything the CEO asked for.`,
       },
     ],
     { temperature: 0.5 }
