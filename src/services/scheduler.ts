@@ -92,9 +92,9 @@ export function startScheduler(): void {
     })
   );
 
-  // Check pending delegated tasks every 30 minutes
+  // Check pending delegated tasks daily at 4 PM
   scheduledJobs.push(
-    cron.schedule('*/30 * * * *', async () => {
+    cron.schedule('0 16 * * *', async () => {
       logger.info('Checking pending delegated tasks');
       try {
         await checkPendingTasks();
