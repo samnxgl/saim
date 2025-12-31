@@ -32,6 +32,9 @@ const configSchema = z.object({
   blandApiKey: z.string().optional(),
   blandWebhookSecret: z.string().optional(),
 
+  // OpenAI (optional - for realtime voice)
+  openaiApiKey: z.string().optional(),
+
   // Application
   port: z.number().default(3000),
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
@@ -64,6 +67,7 @@ function loadConfig(): Config {
     autoContentApiKey: process.env.AUTOCONTENT_API_KEY,
     blandApiKey: process.env.BLAND_API_KEY,
     blandWebhookSecret: process.env.BLAND_WEBHOOK_SECRET,
+    openaiApiKey: process.env.OPENAI_API_KEY,
     port: parseInt(process.env.PORT || '3000', 10),
     nodeEnv: process.env.NODE_ENV,
     logLevel: process.env.LOG_LEVEL,

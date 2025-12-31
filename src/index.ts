@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'path';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
 import { closeDatabase } from './db/index.js';
@@ -28,11 +29,29 @@ async function main() {
     });
   });
 
+  // Serve voice interface static files
+  const voicePublicPath = path.join(process.cwd(), 'dist/voice/public');
+  expressApp.use('/voice-app', express.static(voicePublicPath));
+
+  // Voice interface route
+  expressApp.get('/talk', (req, res) => {
+    res.sendFile(path.join(voicePublicPath, 'index.html'));
+  });
+
   // Start Express server immediately for health checks
   const server = expressApp.listen(config.port, '0.0.0.0', () => {
     console.log(`Health check server listening on 0.0.0.0:${config.port}`);
     logger.info(`Health check server listening on port ${config.port}`);
   });
+
+  // Initialize voice WebSocket server
+  try {
+    const { initializeVoiceServer } = await import('./voice/server.js');
+    initializeVoiceServer(server);
+    logger.info('Voice WebSocket server initialized');
+  } catch (error) {
+    logger.warn('Voice server not initialized', { error });
+  }
 
   // Initialize remaining services after health check is available
   try {
