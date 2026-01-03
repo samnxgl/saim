@@ -453,26 +453,38 @@ async function handleCallCommand(text: string, input: ProcessMessageInput): Prom
     // Extract recipient name if mentioned
     const recipientName = extractRecipientName(text);
 
-    // Extract the task/instructions - everything after common patterns
-    let task = text;
-    const taskPatterns = [
-      /call\s+(?:[^,]+,?\s+)?(?:and\s+)?(.+)/i,
-      /phone\s+(?:[^,]+,?\s+)?(?:and\s+)?(.+)/i,
-      /dial\s+(?:[^,]+,?\s+)?(?:and\s+)?(.+)/i,
-      /to\s+(?:ask|discuss|talk about|inquire about|find out|check on|follow up on)\s+(.+)/i,
-    ];
+    // Extract the task/instructions - look for "and" followed by the actual task
+    let task = '';
 
-    for (const pattern of taskPatterns) {
-      const match = text.match(pattern);
-      if (match && match[1]) {
-        task = match[1].trim();
-        break;
+    // Pattern to extract instructions after "and" (e.g., "Call Paul on +123 and find out if...")
+    const andTaskMatch = text.match(/\band\s+(.+)$/i);
+    if (andTaskMatch) {
+      task = andTaskMatch[1].trim();
+    }
+
+    // If no "and" pattern, try other patterns
+    if (!task) {
+      const taskPatterns = [
+        /(?:to|about)\s+((?:ask|discuss|find out|check|inquire|talk about|follow up).+)$/i,
+        /(?:ask(?:ing)?|discuss(?:ing)?|find(?:ing)? out|check(?:ing)?)\s+(.+)$/i,
+      ];
+
+      for (const pattern of taskPatterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+          task = match[1].trim();
+          break;
+        }
       }
     }
 
-    // If no specific task extracted, use the full text minus the phone number
-    if (task === text) {
-      task = text.replace(phoneNumber, '').replace(/call|phone|dial|ring/gi, '').trim();
+    // Fallback: remove the phone number and "call X on" prefix
+    if (!task) {
+      task = text
+        .replace(/^call\s+\w+\s+(?:on\s+)?/i, '')
+        .replace(phoneNumber, '')
+        .replace(/^\s*(?:and\s+)?/, '')
+        .trim();
     }
 
     if (!task || task.length < 5) {

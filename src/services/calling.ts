@@ -60,8 +60,8 @@ export async function initiateCall(request: InitiateCallRequest): Promise<CallRe
       phone_number: formattedPhone,
       task: callTask,
       first_sentence: request.recipientName
-        ? `Hello, this is Saim calling on behalf of the CEO of Next Gen Learning. Am I speaking with ${request.recipientName}?`
-        : 'Hello, this is Saim calling on behalf of the CEO of Next Gen Learning.',
+        ? `Hello, this is Saim calling on behalf of Sam from Next Gen Learning. Am I speaking with ${request.recipientName}?`
+        : 'Hello, this is Saim calling on behalf of Sam from Next Gen Learning.',
       wait_for_greeting: true,
       record: true,
       max_duration: 15,
@@ -82,15 +82,6 @@ export async function initiateCall(request: InitiateCallRequest): Promise<CallRe
       slackChannelId: request.slackChannelId,
       slackThreadTs: request.slackThreadTs,
     });
-
-    // Notify that call is in progress
-    if (request.slackChannelId) {
-      await sendMessage(
-        request.slackChannelId,
-        `I'm now calling ${request.recipientName || formattedPhone}. I'll report back when the call is complete.`,
-        { threadTs: request.slackThreadTs }
-      );
-    }
 
     // Monitor the call in the background
     monitorCallProgress(callResponse.call_id, request);
@@ -113,7 +104,7 @@ export async function initiateCall(request: InitiateCallRequest): Promise<CallRe
  * Build a comprehensive task prompt for the AI caller
  */
 function buildCallTask(userTask: string, recipientName?: string): string {
-  return `You are Saim, an AI executive assistant calling on behalf of the CEO of Next Gen Learning.
+  return `You are Saim, an AI executive assistant calling on behalf of Sam from Next Gen Learning.
 
 Your objective: ${userTask}
 
@@ -121,7 +112,7 @@ Guidelines:
 - Be professional, courteous, and efficient
 - Clearly identify yourself as an AI assistant at the start of the call
 - If the recipient is not available, offer to leave a message or ask for a callback time
-- If you reach voicemail, leave a clear message with your purpose and ask them to contact the CEO
+- If you reach voicemail, leave a clear message with your purpose and ask them to contact Sam
 - Take note of any important information shared during the call
 - If the task requires a decision or commitment, confirm understanding before ending
 - Thank the recipient for their time at the end of the call
