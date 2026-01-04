@@ -26,6 +26,16 @@ import {
   extractRecipientName,
 } from '../services/calling.js';
 import { isBlandConfigured } from '../integrations/bland/index.js';
+import {
+  isCalendarConfigured,
+  getTodayEvents,
+  getUpcomingEvents,
+  getEventsForDays,
+  formatEventForDisplay,
+} from '../integrations/google/calendar.js';
+import {
+  researchNextExternalMeeting,
+} from '../services/meeting-prep.js';
 
 export interface ProcessMessageInput {
   text: string;
@@ -165,6 +175,24 @@ async function handleCEOCommands(
   // Handle podcast command
   if (lowerText.includes('podcast') || lowerText.includes('audio summary') || lowerText.includes('daily recap')) {
     return handlePodcastCommand(text);
+  }
+
+  // Handle calendar command
+  const calendarPatterns = [
+    'calendar',
+    'schedule',
+    'meeting',
+    'meetings',
+    'what do i have',
+    'what\'s on',
+    'my day',
+    'my week',
+    'upcoming',
+    'agenda',
+  ];
+  const isCalendarQuery = calendarPatterns.some(pattern => lowerText.includes(pattern));
+  if (isCalendarQuery) {
+    return handleCalendarCommand(text);
   }
 
   return null;
@@ -434,6 +462,109 @@ async function handlePodcastCommand(text: string): Promise<string> {
   } catch (error) {
     logger.error('Failed to generate podcast', { error });
     return "I encountered an error while generating the podcast. Please try again later or check the AutoContent API configuration.";
+  }
+}
+
+async function handleCalendarCommand(text: string): Promise<string> {
+  if (!isCalendarConfigured()) {
+    return "Calendar integration isn't configured yet. Please set up Google Calendar credentials to view your schedule.";
+  }
+
+  const lowerText = text.toLowerCase();
+
+  try {
+    // Check for research request
+    if (lowerText.includes('research') || lowerText.includes('who is') || lowerText.includes('attendee')) {
+      logger.info('Researching meeting attendees');
+      return await researchNextExternalMeeting();
+    }
+
+    // Check for week view
+    if (lowerText.includes('week') || lowerText.includes('next 7')) {
+      const events = await getEventsForDays(7);
+
+      if (events.length === 0) {
+        return "Your calendar is clear for the next 7 days.";
+      }
+
+      // Group events by day
+      const eventsByDay: Record<string, typeof events> = {};
+      for (const event of events) {
+        const dayKey = event.start.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        if (!eventsByDay[dayKey]) {
+          eventsByDay[dayKey] = [];
+        }
+        eventsByDay[dayKey].push(event);
+      }
+
+      let response = `**Your schedule for the next 7 days** (${events.length} events):\n\n`;
+      for (const [day, dayEvents] of Object.entries(eventsByDay)) {
+        response += `**${day}:**\n`;
+        for (const event of dayEvents) {
+          response += `• ${formatEventForDisplay(event)}\n`;
+        }
+        response += '\n';
+      }
+
+      return response;
+    }
+
+    // Check for tomorrow
+    if (lowerText.includes('tomorrow')) {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0);
+      const endOfTomorrow = new Date(tomorrow);
+      endOfTomorrow.setHours(23, 59, 59, 999);
+
+      const { getEvents } = await import('../integrations/google/calendar.js');
+      const events = await getEvents(tomorrow, endOfTomorrow);
+
+      if (events.length === 0) {
+        return "You have no meetings scheduled for tomorrow.";
+      }
+
+      let response = `**Tomorrow's schedule** (${events.length} events):\n\n`;
+      for (const event of events) {
+        response += `• ${formatEventForDisplay(event)}\n\n`;
+      }
+
+      return response;
+    }
+
+    // Check for upcoming/next few hours
+    if (lowerText.includes('upcoming') || lowerText.includes('next few') || lowerText.includes('coming up')) {
+      const events = await getUpcomingEvents(8); // Next 8 hours
+
+      if (events.length === 0) {
+        return "You have no meetings coming up in the next 8 hours.";
+      }
+
+      let response = `**Upcoming meetings** (next 8 hours):\n\n`;
+      for (const event of events) {
+        response += `• ${formatEventForDisplay(event)}\n\n`;
+      }
+
+      return response;
+    }
+
+    // Default to today's calendar
+    const events = await getTodayEvents();
+
+    if (events.length === 0) {
+      return "You have no meetings scheduled for today.";
+    }
+
+    let response = `**Today's schedule** (${events.length} events):\n\n`;
+    for (const event of events) {
+      response += `• ${formatEventForDisplay(event)}\n\n`;
+    }
+
+    return response;
+
+  } catch (error) {
+    logger.error('Failed to handle calendar command', { error });
+    return "I encountered an error while checking your calendar. Please try again or verify the calendar configuration.";
   }
 }
 

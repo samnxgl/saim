@@ -5,6 +5,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/documents.readonly',
   'https://www.googleapis.com/auth/spreadsheets.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/calendar.readonly',
 ];
 
 export function getGoogleAuth() {
@@ -32,4 +33,9 @@ export function getSheetsClient() {
 export function getDriveClient() {
   const auth = getGoogleAuth();
   return google.drive({ version: 'v3', auth });
+}
+
+export function getCalendarClient() {
+  const auth = getGoogleAuth();
+  return google.calendar({ version: 'v3', auth });
 }

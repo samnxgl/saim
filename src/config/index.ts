@@ -35,6 +35,9 @@ const configSchema = z.object({
   // OpenAI (optional - for realtime voice)
   openaiApiKey: z.string().optional(),
 
+  // Google Calendar (optional - for calendar integration)
+  googleCalendarId: z.string().optional(), // Usually the CEO's email or 'primary'
+
   // Application
   port: z.number().default(3000),
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
@@ -68,6 +71,7 @@ function loadConfig(): Config {
     blandApiKey: process.env.BLAND_API_KEY,
     blandWebhookSecret: process.env.BLAND_WEBHOOK_SECRET,
     openaiApiKey: process.env.OPENAI_API_KEY,
+    googleCalendarId: process.env.GOOGLE_CALENDAR_ID || 'primary',
     port: parseInt(process.env.PORT || '3000', 10),
     nodeEnv: process.env.NODE_ENV,
     logLevel: process.env.LOG_LEVEL,

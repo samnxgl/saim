@@ -8,6 +8,8 @@ import { analyzeRecentCommunications, sendDailyBriefing } from './patterns.js';
 import { checkPendingTasks } from './tasks.js';
 import { sendDailyPodcastToCEO } from './podcast.js';
 import { isAutoContentConfigured } from '../integrations/autocontent/index.js';
+import { checkUpcomingMeetingsForResearch } from './meeting-prep.js';
+import { isCalendarConfigured } from '../integrations/google/calendar.js';
 
 let isRunning = false;
 const scheduledJobs: cron.ScheduledTask[] = [];
@@ -103,6 +105,23 @@ export function startScheduler(): void {
       }
     })
   );
+
+  // Check for upcoming meetings and send research briefings (every 15 minutes)
+  if (isCalendarConfigured()) {
+    scheduledJobs.push(
+      cron.schedule('*/15 * * * *', async () => {
+        logger.info('Checking upcoming meetings for research');
+        try {
+          await checkUpcomingMeetingsForResearch();
+        } catch (error) {
+          logger.error('Meeting research check failed', { error });
+        }
+      })
+    );
+    logger.info('Meeting prep research scheduled (every 15 minutes)');
+  } else {
+    logger.info('Meeting prep not scheduled - Calendar not configured');
+  }
 
   // Generate daily podcast at configured time (default 6 PM)
   if (isAutoContentConfigured()) {
