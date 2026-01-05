@@ -36,6 +36,10 @@ import {
 import {
   researchNextExternalMeeting,
 } from '../services/meeting-prep.js';
+import {
+  getLatestNPS,
+  formatNPSForSlack,
+} from '../services/nps.js';
 
 export interface ProcessMessageInput {
   text: string;
@@ -193,6 +197,11 @@ async function handleCEOCommands(
   const isCalendarQuery = calendarPatterns.some(pattern => lowerText.includes(pattern));
   if (isCalendarQuery) {
     return handleCalendarCommand(text);
+  }
+
+  // Handle NPS command
+  if (lowerText.includes('nps') || lowerText.includes('net promoter')) {
+    return handleNPSCommand(text);
   }
 
   return null;
@@ -565,6 +574,40 @@ async function handleCalendarCommand(text: string): Promise<string> {
   } catch (error) {
     logger.error('Failed to handle calendar command', { error });
     return "I encountered an error while checking your calendar. Please try again or verify the calendar configuration.";
+  }
+}
+
+async function handleNPSCommand(text: string): Promise<string> {
+  const lowerText = text.toLowerCase();
+
+  try {
+    // Check for specific time period
+    let days: number | undefined;
+
+    if (lowerText.includes('today') || lowerText.includes('24 hour')) {
+      days = 1;
+    } else if (lowerText.includes('week') || lowerText.includes('7 day')) {
+      days = 7;
+    } else if (lowerText.includes('month') || lowerText.includes('30 day')) {
+      days = 30;
+    } else if (lowerText.includes('quarter') || lowerText.includes('90 day')) {
+      days = 90;
+    } else if (lowerText.includes('year') || lowerText.includes('365 day')) {
+      days = 365;
+    }
+    // If no period specified, get all-time NPS (days = undefined)
+
+    logger.info('Calculating NPS', { days });
+
+    const result = await getLatestNPS({ days });
+    return formatNPSForSlack(result);
+
+  } catch (error) {
+    logger.error('Failed to calculate NPS', { error });
+    if (error instanceof Error && error.message.includes('Could not find channel')) {
+      return "I couldn't find the #notifications-nps channel. Please make sure the channel exists and Saim has access to it.";
+    }
+    return "I encountered an error while calculating the NPS. Please try again or check that the #notifications-nps channel is accessible.";
   }
 }
 
