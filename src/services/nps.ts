@@ -208,6 +208,28 @@ export async function getLatestNPS(options?: {
 }
 
 /**
+ * Get NPS for yesterday only
+ */
+export async function getYesterdayNPS(): Promise<NPSResult> {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(0, 0, 0, 0);
+
+  const endOfYesterday = new Date(yesterday);
+  endOfYesterday.setHours(23, 59, 59, 999);
+
+  const scores = await fetchAllNPSScores({
+    oldest: yesterday,
+    latest: endOfYesterday,
+  });
+
+  const result = calculateNPS(scores);
+  result.period = 'yesterday';
+
+  return result;
+}
+
+/**
  * Format NPS result for Slack display
  */
 export function formatNPSForSlack(result: NPSResult): string {

@@ -38,10 +38,12 @@ import {
 } from '../services/meeting-prep.js';
 import {
   getLatestNPS,
+  getYesterdayNPS,
   formatNPSForSlack,
 } from '../services/nps.js';
 import {
   getLatestSales,
+  getYesterdaySales,
   formatSalesForSlack,
 } from '../services/sales.js';
 
@@ -597,6 +599,10 @@ async function handleNPSCommand(text: string): Promise<string> {
 
     if (lowerText.includes('today') || lowerText.includes('24 hour')) {
       days = 1;
+    } else if (lowerText.includes('yesterday')) {
+      // Special handling for yesterday
+      const result = await getYesterdayNPS();
+      return formatNPSForSlack(result);
     } else if (lowerText.includes('week') || lowerText.includes('7 day')) {
       days = 7;
     } else if (lowerText.includes('month') || lowerText.includes('30 day')) {
@@ -628,9 +634,15 @@ async function handleSalesCommand(text: string): Promise<string> {
   try {
     // Check for specific time period
     let days: number | undefined;
+    let periodLabel: string | undefined;
 
     if (lowerText.includes('today') || lowerText.includes('24 hour')) {
       days = 1;
+      periodLabel = 'today';
+    } else if (lowerText.includes('yesterday')) {
+      // Special handling for yesterday - need to pass date range
+      const result = await getYesterdaySales();
+      return formatSalesForSlack(result);
     } else if (lowerText.includes('week') || lowerText.includes('7 day')) {
       days = 7;
     } else if (lowerText.includes('month') || lowerText.includes('30 day')) {

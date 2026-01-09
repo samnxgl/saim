@@ -240,6 +240,28 @@ export async function getLatestSales(options?: {
 }
 
 /**
+ * Get sales data for yesterday only
+ */
+export async function getYesterdaySales(): Promise<SalesResult> {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(0, 0, 0, 0);
+
+  const endOfYesterday = new Date(yesterday);
+  endOfYesterday.setHours(23, 59, 59, 999);
+
+  const transactions = await fetchAllTransactions({
+    oldest: yesterday,
+    latest: endOfYesterday,
+  });
+
+  const result = calculateSales(transactions);
+  result.period = 'yesterday';
+
+  return result;
+}
+
+/**
  * Format sales result for Slack display
  */
 export function formatSalesForSlack(result: SalesResult): string {
