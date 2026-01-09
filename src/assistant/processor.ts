@@ -40,6 +40,10 @@ import {
   getLatestNPS,
   formatNPSForSlack,
 } from '../services/nps.js';
+import {
+  getLatestSales,
+  formatSalesForSlack,
+} from '../services/sales.js';
 
 export interface ProcessMessageInput {
   text: string;
@@ -202,6 +206,13 @@ async function handleCEOCommands(
   // Handle NPS command
   if (lowerText.includes('nps') || lowerText.includes('net promoter')) {
     return handleNPSCommand(text);
+  }
+
+  // Handle sales command
+  const salesPatterns = ['sales', 'revenue', 'transactions', 'billing', 'payments', 'deposits'];
+  const isSalesQuery = salesPatterns.some(pattern => lowerText.includes(pattern));
+  if (isSalesQuery) {
+    return handleSalesCommand(text);
   }
 
   return null;
@@ -608,6 +619,40 @@ async function handleNPSCommand(text: string): Promise<string> {
       return "I couldn't find the #notifications-nps channel. Please make sure the channel exists and Saim has access to it.";
     }
     return "I encountered an error while calculating the NPS. Please try again or check that the #notifications-nps channel is accessible.";
+  }
+}
+
+async function handleSalesCommand(text: string): Promise<string> {
+  const lowerText = text.toLowerCase();
+
+  try {
+    // Check for specific time period
+    let days: number | undefined;
+
+    if (lowerText.includes('today') || lowerText.includes('24 hour')) {
+      days = 1;
+    } else if (lowerText.includes('week') || lowerText.includes('7 day')) {
+      days = 7;
+    } else if (lowerText.includes('month') || lowerText.includes('30 day')) {
+      days = 30;
+    } else if (lowerText.includes('quarter') || lowerText.includes('90 day')) {
+      days = 90;
+    } else if (lowerText.includes('year') || lowerText.includes('365 day')) {
+      days = 365;
+    }
+    // If no period specified, get all-time sales (days = undefined)
+
+    logger.info('Calculating sales', { days });
+
+    const result = await getLatestSales({ days });
+    return formatSalesForSlack(result);
+
+  } catch (error) {
+    logger.error('Failed to calculate sales', { error });
+    if (error instanceof Error && error.message.includes('Could not find channel')) {
+      return "I couldn't find the #billing channel. Please make sure the channel exists and Saim has access to it.";
+    }
+    return "I encountered an error while calculating sales. Please try again or check that the #billing channel is accessible.";
   }
 }
 
