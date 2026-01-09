@@ -36,20 +36,43 @@ export interface SalesResult {
 function extractTransactionFromMessage(text: string): Transaction | null {
   const lowerText = text.toLowerCase();
 
-  // Try to extract amount - look for currency patterns
+  // Skip bot messages that aren't transaction notifications
+  if (lowerText.includes('error') || lowerText.includes('failed') || lowerText.includes('declined')) {
+    return null;
+  }
+
+  // Try to extract amount - look for currency patterns (most specific to least)
   const amountPatterns = [
-    /\$\s*([\d,]+(?:\.\d{2})?)/,  // $1,234.56 or $100
-    /(\d[\d,]*(?:\.\d{2})?)\s*(?:dollars?|usd)/i,  // 1234.56 dollars
-    /(?:amount|total|paid|payment)[:\s]+\$?\s*([\d,]+(?:\.\d{2})?)/i,  // amount: $100
+    /\$\s*([\d,]+(?:\.\d{2})?)/g,  // $1,234.56 or $100 - use global to find all
+    /(?:amount|total|paid|payment|received|charge)[:\s]*\$?\s*([\d,]+(?:\.\d{2})?)/gi,
+    /(\d[\d,]*(?:\.\d{2})?)\s*(?:dollars?|usd)/gi,
+    /(?:for|of)\s+\$?\s*([\d,]+(?:\.\d{2})?)/gi,
   ];
 
   let amount: number | null = null;
+
+  // Try each pattern
   for (const pattern of amountPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      // Remove commas and parse
-      amount = parseFloat(match[1].replace(/,/g, ''));
-      break;
+    const matches = text.matchAll(pattern);
+    for (const match of matches) {
+      const parsed = parseFloat(match[1].replace(/,/g, ''));
+      // Take the first valid amount we find (usually the transaction amount)
+      if (parsed > 0) {
+        amount = parsed;
+        break;
+      }
+    }
+    if (amount !== null) break;
+  }
+
+  // If still no amount, try to find any number that looks like money (3+ digits or has decimals)
+  if (amount === null) {
+    const genericMatch = text.match(/(\d{3,}(?:\.\d{2})?|\d+\.\d{2})/);
+    if (genericMatch) {
+      const parsed = parseFloat(genericMatch[1].replace(/,/g, ''));
+      if (parsed >= 50) {  // Assume transactions are at least $50
+        amount = parsed;
+      }
     }
   }
 
@@ -68,22 +91,38 @@ function extractTransactionFromMessage(text: string): Transaction | null {
     'partial',
     'initial payment',
     'booking fee',
+    'reservation',
+    'holding',
+  ];
+
+  const fullPaymentIndicators = [
+    'full payment',
+    'balance',
+    'remaining',
+    'final payment',
+    'paid in full',
+    'complete payment',
   ];
 
   const isDeposit = depositIndicators.some(indicator => lowerText.includes(indicator));
+  const isFullPayment = fullPaymentIndicators.some(indicator => lowerText.includes(indicator));
 
-  // Also check if amount is exactly $100 (common deposit amount)
-  if (isDeposit || amount === 100) {
+  // Determine type based on indicators and amount
+  if (isFullPayment) {
+    type = 'full_payment';
+  } else if (isDeposit || amount === 100) {
     type = 'deposit';
   } else {
-    type = 'full_payment';
+    // Default: amounts over $100 are likely full payments
+    type = amount > 100 ? 'full_payment' : 'deposit';
   }
 
-  // Try to extract customer name
+  // Try to extract customer name (more flexible patterns)
   let customerName: string | undefined;
   const namePatterns = [
-    /(?:from|customer|client|name)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/,
-    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:paid|deposited|sent)/,
+    /(?:from|customer|client|name|by)[:\s]+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)/,
+    /([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:paid|deposited|sent|made)/,
+    /(?:payment|deposit)\s+(?:from|by)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)/i,
   ];
 
   for (const pattern of namePatterns) {
